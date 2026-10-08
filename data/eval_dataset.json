@@ -1,0 +1,52 @@
+[
+  {
+    "id": "rom_01",
+    "question": "Does training through a full range of motion improve muscle growth compared with partial range of motion?",
+    "relevant_document_ids": ["10.1177_2050312120901559"]
+  },
+  {
+    "id": "creatine_01",
+    "question": "Does creatine supplementation improve high-intensity exercise performance?",
+    "relevant_document_ids": ["12970_2017_Article_173"]
+  },
+  {
+    "id": "diet_01",
+    "question": "What is the main dietary requirement for losing body fat?",
+    "relevant_document_ids": ["12970_2017_Article_174"]
+  },
+  {
+    "id": "protein_01",
+    "question": "How much daily protein is sufficient for most exercising people who want to build or maintain muscle?",
+    "relevant_document_ids": ["12970_2017_Article_177"]
+  },
+  {
+    "id": "failure_01",
+    "question": "Must every resistance-training set reach momentary muscular failure to maximize hypertrophy?",
+    "relevant_document_ids": ["40279_2022_Article_1784", "msse-58-851"]
+  },
+  {
+    "id": "concurrent_01",
+    "question": "How can training status affect adaptations to concurrent strength and endurance training?",
+    "relevant_document_ids": ["40279_2023_Article_1943"]
+  },
+  {
+    "id": "sleep_01",
+    "question": "Which sleep interventions appear most effective for improving athletic performance?",
+    "relevant_document_ids": ["40798_2023_Article_599"]
+  },
+  {
+    "id": "prescription_01",
+    "question": "Are heavier resistance-training loads more effective for strength while multiple sets help hypertrophy?",
+    "relevant_document_ids": ["bjsports-2023-106807", "msse-58-851"]
+  },
+  {
+    "id": "rest_01",
+    "question": "How do longer versus shorter rest intervals between sets affect muscle hypertrophy?",
+    "relevant_document_ids": ["fspor-06-1429789"]
+  },
+  {
+    "id": "acsm_01",
+    "question": "What resistance-training variables does the ACSM position stand discuss for improving strength and hypertrophy?",
+    "relevant_document_ids": ["msse-58-851"]
+  }
+]

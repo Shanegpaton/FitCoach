@@ -1,0 +1,290 @@
+{
+  "configuration": {
+    "retrieval": "hybrid (dense + BM25 with reciprocal rank fusion)",
+    "top_k": 5,
+    "embedding_model": "sentence-transformers/all-mpnet-base-v2",
+    "generation_and_judge_model": "llama3.2",
+    "question_count": 10
+  },
+  "aggregate": {
+    "hit_rate_at_k": 1.0,
+    "mrr": 1.0,
+    "faithfulness": 0.64,
+    "answer_relevance": 0.6599999999999999,
+    "context_relevance": 0.72
+  },
+  "results": [
+    {
+      "id": "rom_01",
+      "question": "Does training through a full range of motion improve muscle growth compared with partial range of motion?",
+      "relevant_document_ids": [
+        "10.1177_2050312120901559"
+      ],
+      "retrieved_chunk_ids": [
+        "10.1177_2050312120901559::chunk_003",
+        "10.1177_2050312120901559::chunk_036",
+        "10.1177_2050312120901559::chunk_013",
+        "10.1177_2050312120901559::chunk_005",
+        "10.1177_2050312120901559::chunk_002"
+      ],
+      "retrieved_document_ids": [
+        "10.1177_2050312120901559",
+        "10.1177_2050312120901559",
+        "10.1177_2050312120901559",
+        "10.1177_2050312120901559",
+        "10.1177_2050312120901559"
+      ],
+      "answer": "Based on the provided evidence, it appears that training through a full range of motion (ROM) may be beneficial for muscle growth, particularly for the lower body. \n\nThe systematic review by Schoenfeld and Grgic (2020) found that performing RT through a full ROM confers beneficial effects on hypertrophy of the lower body musculature compared to training with a partial ROM [S1]. \n\nAdditionally, a study by Pinto et al. (2012) found that elbow flexor muscle thickness was significantly increased for both training groups with effect size differences favoring full ROM [S3]. \n\nHowever, the evidence for training-induced variations in ROM on muscular strength appears compelling, but its effects on hypertrophy are less clear [S4]. \n\nIt is also worth noting that a study by Goto et al. (2019) found that partial range of motion exercise is effective for facilitating muscle hypertrophy and function through sustained intramuscular hypoxia in young trained men [S2]. \n\nOverall, while the evidence is not entirely consistent, it suggests that training through a full ROM may be beneficial for muscle growth, particularly for the lower body.",
+      "hit_rate_at_k": 1.0,
+      "mrr": 1.0,
+      "faithfulness": 0.8,
+      "answer_relevance": 0.7,
+      "context_relevance": 0.9
+    },
+    {
+      "id": "creatine_01",
+      "question": "Does creatine supplementation improve high-intensity exercise performance?",
+      "relevant_document_ids": [
+        "12970_2017_Article_173"
+      ],
+      "retrieved_chunk_ids": [
+        "12970_2017_Article_173::chunk_078",
+        "12970_2017_Article_173::chunk_019",
+        "12970_2017_Article_173::chunk_018",
+        "12970_2017_Article_173::chunk_001",
+        "12970_2017_Article_173::chunk_080"
+      ],
+      "retrieved_document_ids": [
+        "12970_2017_Article_173",
+        "12970_2017_Article_173",
+        "12970_2017_Article_173",
+        "12970_2017_Article_173",
+        "12970_2017_Article_173"
+      ],
+      "answer": "Yes, creatine supplementation has been shown to improve high-intensity exercise performance. According to the International Society of Sports Nutrition Position Stand: Safety and Efficacy of Creatine Supplementation in Exercise, Sport, and Medicine [S2], after creatine loading, performance of high intensity and/or repetitive exercise is generally increased by 10 \u201320% depending on the magnitude of the increase in muscle creatine and phosphocreatine [S3]. Additionally, studies such as [S1] and [S4] have reported benefits of creatine supplementation on high-intensity exercise performance.",
+      "hit_rate_at_k": 1.0,
+      "mrr": 1.0,
+      "faithfulness": 0.8,
+      "answer_relevance": 0.9,
+      "context_relevance": 0.9
+    },
+    {
+      "id": "diet_01",
+      "question": "What is the main dietary requirement for losing body fat?",
+      "relevant_document_ids": [
+        "12970_2017_Article_174"
+      ],
+      "retrieved_chunk_ids": [
+        "12970_2017_Article_174::chunk_015",
+        "12970_2017_Article_174::chunk_016",
+        "12970_2017_Article_174::chunk_093",
+        "12970_2017_Article_174::chunk_054",
+        "12970_2017_Article_174::chunk_006"
+      ],
+      "retrieved_document_ids": [
+        "12970_2017_Article_174",
+        "12970_2017_Article_174",
+        "12970_2017_Article_174",
+        "12970_2017_Article_174",
+        "12970_2017_Article_174"
+      ],
+      "answer": "I do not have enough evidence in the provided sources.",
+      "hit_rate_at_k": 1.0,
+      "mrr": 1.0,
+      "faithfulness": 0.0,
+      "answer_relevance": 0.0,
+      "context_relevance": 0.0
+    },
+    {
+      "id": "protein_01",
+      "question": "How much daily protein is sufficient for most exercising people who want to build or maintain muscle?",
+      "relevant_document_ids": [
+        "12970_2017_Article_177"
+      ],
+      "retrieved_chunk_ids": [
+        "12970_2017_Article_177::chunk_002",
+        "12970_2017_Article_177::chunk_059",
+        "12970_2017_Article_177::chunk_060",
+        "12970_2017_Article_177::chunk_054",
+        "12970_2017_Article_177::chunk_104"
+      ],
+      "retrieved_document_ids": [
+        "12970_2017_Article_177",
+        "12970_2017_Article_177",
+        "12970_2017_Article_177",
+        "12970_2017_Article_177",
+        "12970_2017_Article_177"
+      ],
+      "answer": "According to the International Society of Sports Nutrition Position Stand: Protein and Exercise [S1], for building muscle mass and for maintaining muscle mass through a positive muscle protein balance, an overall daily protein intake in the range of 1.4 \u20132.0 g protein/kg body weight/day (g/kg/d) is sufficient for most exercising individuals.",
+      "hit_rate_at_k": 1.0,
+      "mrr": 1.0,
+      "faithfulness": 0.8,
+      "answer_relevance": 0.9,
+      "context_relevance": 0.9
+    },
+    {
+      "id": "failure_01",
+      "question": "Must every resistance-training set reach momentary muscular failure to maximize hypertrophy?",
+      "relevant_document_ids": [
+        "40279_2022_Article_1784",
+        "msse-58-851"
+      ],
+      "retrieved_chunk_ids": [
+        "40279_2022_Article_1784::chunk_002",
+        "40279_2022_Article_1784::chunk_041",
+        "40279_2022_Article_1784::chunk_003",
+        "40279_2022_Article_1784::chunk_056",
+        "40279_2022_Article_1784::chunk_005"
+      ],
+      "retrieved_document_ids": [
+        "40279_2022_Article_1784",
+        "40279_2022_Article_1784",
+        "40279_2022_Article_1784",
+        "40279_2022_Article_1784",
+        "40279_2022_Article_1784"
+      ],
+      "answer": "Based on the provided evidence, it appears that there is no conclusive evidence to support that every resistance-training set must reach momentary muscular failure to maximize hypertrophy. In fact, the systematic review found that:\n\n* There was a trivial advantage for resistance training performed to set failure versus non-failure for muscle hypertrophy, but this effect was not significant when considering momentary muscular failure specifically [S1, S2, S4].\n* Sub-group analyses found no advantage for resistance training performed to momentary muscular failure versus non-failure for muscle hypertrophy [S1, S2, S4].\n* Higher velocity loss thresholds, and theoretically closer proximities-to-failure, did not always elicit greater muscle hypertrophy [S1, S2, S4].\n\nTherefore, the evidence suggests that the proximity-to-failure may not be as important as previously thought, and that muscle hypertrophy can be achieved prior to reaching momentary muscular failure during resistance training.",
+      "hit_rate_at_k": 1.0,
+      "mrr": 1.0,
+      "faithfulness": 0.8,
+      "answer_relevance": 0.9,
+      "context_relevance": 0.9
+    },
+    {
+      "id": "concurrent_01",
+      "question": "How can training status affect adaptations to concurrent strength and endurance training?",
+      "relevant_document_ids": [
+        "40279_2023_Article_1943"
+      ],
+      "retrieved_chunk_ids": [
+        "40279_2023_Article_1943::chunk_007",
+        "40279_2023_Article_1943::chunk_004",
+        "40279_2023_Article_1943::chunk_008",
+        "40279_2023_Article_1943::chunk_047",
+        "40279_2023_Article_1943::chunk_037"
+      ],
+      "retrieved_document_ids": [
+        "40279_2023_Article_1943",
+        "40279_2023_Article_1943",
+        "40279_2023_Article_1943",
+        "40279_2023_Article_1943",
+        "40279_2023_Article_1943"
+      ],
+      "answer": "According to the evidence, training status can affect adaptations to concurrent strength and endurance training. Specifically, [S2] states that untrained but not trained or highly trained endurance athletes displayed impaired improvements for maximal oxygen consumption with concurrent training. Additionally, [S4] mentions that highly trained athletes are under-represented in the concurrent training literature, and that adding a critical power criterion to the training status classification framework could be worthwhile to describe more specific subgroups, such as highly trained athletes.\n\nIt is also mentioned in [S4] that untrained individuals should be aware of the potential small-to-moderate interference effects resulting in blunted training adaptations, and that male athletes should be extra cautious when aiming to improve lower-body strength.\n\nHowever, [S4] does not provide conclusive evidence that training status affects adaptations to concurrent strength and endurance training in a significant way for trained or highly trained athletes.",
+      "hit_rate_at_k": 1.0,
+      "mrr": 1.0,
+      "faithfulness": 0.8,
+      "answer_relevance": 0.7,
+      "context_relevance": 0.9
+    },
+    {
+      "id": "sleep_01",
+      "question": "Which sleep interventions appear most effective for improving athletic performance?",
+      "relevant_document_ids": [
+        "40798_2023_Article_599"
+      ],
+      "retrieved_chunk_ids": [
+        "40798_2023_Article_599::chunk_007",
+        "40798_2023_Article_599::chunk_002",
+        "40798_2023_Article_599::chunk_006",
+        "40798_2023_Article_599::chunk_003",
+        "40798_2023_Article_599::chunk_004"
+      ],
+      "retrieved_document_ids": [
+        "40798_2023_Article_599",
+        "40798_2023_Article_599",
+        "40798_2023_Article_599",
+        "40798_2023_Article_599",
+        "40798_2023_Article_599"
+      ],
+      "answer": "According to the systematic review [S2], the most effective sleep interventions for improving athletic performance are:\n\n1. Sleep extension\n2. Napping (specifically, supplementing sleep during the day with a 20-90min nap)\n3. Mindfulness\n4. Light manipulation\n\nThese interventions were found to be effective in improving physical and/or cognitive performance, although more studies are needed to confirm these findings.",
+      "hit_rate_at_k": 1.0,
+      "mrr": 1.0,
+      "faithfulness": 0.8,
+      "answer_relevance": 0.9,
+      "context_relevance": 0.9
+    },
+    {
+      "id": "prescription_01",
+      "question": "Are heavier resistance-training loads more effective for strength while multiple sets help hypertrophy?",
+      "relevant_document_ids": [
+        "bjsports-2023-106807",
+        "msse-58-851"
+      ],
+      "retrieved_chunk_ids": [
+        "bjsports-2023-106807::chunk_006",
+        "msse-58-851::chunk_066",
+        "msse-58-851::chunk_005",
+        "msse-58-851::chunk_067",
+        "40279_2022_Article_1784::chunk_060"
+      ],
+      "retrieved_document_ids": [
+        "bjsports-2023-106807",
+        "msse-58-851",
+        "msse-58-851",
+        "msse-58-851",
+        "40279_2022_Article_1784"
+      ],
+      "answer": "I do not have enough evidence in the provided sources.",
+      "hit_rate_at_k": 1.0,
+      "mrr": 1.0,
+      "faithfulness": 0.0,
+      "answer_relevance": 0.0,
+      "context_relevance": 0.0
+    },
+    {
+      "id": "rest_01",
+      "question": "How do longer versus shorter rest intervals between sets affect muscle hypertrophy?",
+      "relevant_document_ids": [
+        "fspor-06-1429789"
+      ],
+      "retrieved_chunk_ids": [
+        "fspor-06-1429789::chunk_051",
+        "fspor-06-1429789::chunk_008",
+        "fspor-06-1429789::chunk_006",
+        "fspor-06-1429789::chunk_045",
+        "fspor-06-1429789::chunk_042"
+      ],
+      "retrieved_document_ids": [
+        "fspor-06-1429789",
+        "fspor-06-1429789",
+        "fspor-06-1429789",
+        "fspor-06-1429789",
+        "fspor-06-1429789"
+      ],
+      "answer": "Based on the provided evidence, the systematic review and meta-analysis found that:\n\n* Longer inter-set rest intervals (>60 s) may have a small hypertrophic benefit, but the effect is not significant when resting >90 s between sets [S3].\n* The analysis did not detect appreciable differences in hypertrophy when resting >90 s between sets, consistent with evidence that detrimental effects on volume load tend to plateau beyond this time-frame [S3].\n* Shorter rest periods (\u226460 s) may be associated with reduced volume load, but similar hypertrophy was observed when equating volume load between conditions [S5].\n* The National Strength and Conditioning Association recommends relatively short rest periods (30 \u2013 90 s) to optimize muscle hypertrophy, but the current evidence remains equivocal as to whether resting more than 90 s between sets further enhances hypertrophic adaptations [S1, S2].\n\nIn conclusion, the evidence suggests that the effect of longer versus shorter rest intervals on muscle hypertrophy is small and may plateau beyond 90 s.",
+      "hit_rate_at_k": 1.0,
+      "mrr": 1.0,
+      "faithfulness": 0.8,
+      "answer_relevance": 0.7,
+      "context_relevance": 0.9
+    },
+    {
+      "id": "acsm_01",
+      "question": "What resistance-training variables does the ACSM position stand discuss for improving strength and hypertrophy?",
+      "relevant_document_ids": [
+        "msse-58-851"
+      ],
+      "retrieved_chunk_ids": [
+        "msse-58-851::chunk_119",
+        "bjsports-2023-106807::chunk_068",
+        "msse-58-851::chunk_004",
+        "bjsports-2023-106807::chunk_005",
+        "msse-58-851::chunk_001"
+      ],
+      "retrieved_document_ids": [
+        "msse-58-851",
+        "bjsports-2023-106807",
+        "msse-58-851",
+        "bjsports-2023-106807",
+        "msse-58-851"
+      ],
+      "answer": "According to the American College of Sports Medicine (ACSM) Position Stand [S1], [S3], and [S5], the following resistance-training variables are discussed for improving strength and hypertrophy:\n\n1. Load lifted per repetition: Lifting heavier loads (\u226580% one-repetition maximum) is associated with enhanced voluntary strength [S3].\n2. Sets per exercise: Higher volumes (\u226510 sets/wk) are associated with enhanced muscle hypertrophy [S3].\n3. Eccentric overload: Eccentric overload is associated with enhanced muscle hypertrophy [S3].\n4. Frequency: The ACSM position stand does not specify a specific frequency, but it mentions that RT should be performed at least 2 sessions per week [S3].\n5. Range of motion: Training through a complete range of motion is associated with enhanced voluntary strength [S3].\n\nIt is worth noting that the ACSM position stand emphasizes that few RT prescription variables affect primary adaptations, and that the optimal RT prescription remains contentious [S3].",
+      "hit_rate_at_k": 1.0,
+      "mrr": 1.0,
+      "faithfulness": 0.8,
+      "answer_relevance": 0.9,
+      "context_relevance": 0.9
+    }
+  ]
+}
