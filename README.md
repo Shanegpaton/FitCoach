@@ -2,7 +2,7 @@
 
 FitCoachGPT is a phone-first workout planner and tracker. Build a routine, log your sets, and see your progress in a dark, installable Progressive Web App (PWA).
 
-The app stores plans, goals, workout history, and conversations on your device. After the first online load, the workout tracker works offline without your computer.
+The app stores plans, goals, workout history, and conversations on your device. Google sign-in uses Supabase Auth; each account has a separate local workout database. After an account signs in on a device, the workout tracker remains available offline.
 
 ## Run the PWA
 
@@ -20,6 +20,16 @@ Open `http://localhost:5173`. For production-build and offline testing:
 npm run build
 npm run preview
 ```
+
+### Supabase Google sign-in
+
+Create `frontend/.env.local` from `frontend/.env.example` and set your Supabase project URL and publishable (anon) key. These are public frontend values; never put a Supabase service-role key in the PWA.
+
+In Supabase, enable Google under **Authentication → Providers** and add the Google OAuth client ID and secret. In Google Cloud, set the authorized redirect URI to the callback URL shown by Supabase for your project (`https://<project-ref>.supabase.co/auth/v1/callback`). In Supabase URL configuration, allow the app origin plus `/auth/callback` as a redirect URL (for local development, `http://localhost:5173/auth/callback`; add the trusted HTTPS production origin before release).
+
+The PWA uses the PKCE flow and persists the Supabase session in browser storage. A returning account can open its local plans and log workouts offline even when its token cannot be refreshed. Signing out clears the active auth session but keeps that account’s local database gated from other accounts. Existing anonymous `fitcoach-v1` data is offered for explicit import into an account; the source database remains intact.
+
+Local changes are recorded in a per-account IndexedDB outbox. The repository does not yet contain a FastAPI HTTP application or authenticated synchronization endpoint, so the outbox is groundwork and is not uploaded or drained. Cross-device sync requires that backend and its JWT verification and sync API.
 
 Open `http://localhost:4173` once online, then test offline. Service-worker caching is enabled in the production build, not the development server. Keep using the same origin: development, preview, and different hostnames have separate browser databases.
 
@@ -58,7 +68,7 @@ FITCOACH_TLS_CERT=.certs/local.pem FITCOACH_TLS_KEY=.certs/local-key.pem npm run
 
 Install and trust **only** mkcert's public `rootCA.pem` certificate on the test phone, following its mobile-device instructions; never share `rootCA-key.pem`. On the same Wi-Fi, open `https://YOUR_LAN_IP:4173`, then add the app to the home screen using Safari's Share menu on iOS or Chrome's Install app menu on Android. Open it once, allow caching to finish, and relaunch in airplane mode. Future static HTTPS hosting can serve `frontend/dist/`; it needs an `index.html` fallback for application routes.
 
-Phone testing initially uses your computer to serve the files. Once cached, plans, logging, and history operate independently. Browser data can be cleared or evicted, so keep exported backups. No account synchronization is implemented.
+Phone testing initially uses your computer to serve the files. Once cached, plans, logging, and history operate independently. Browser data can be cleared or evicted, so keep exported backups. Google sign-in requires connectivity; accounts already signed in on that device can continue using their local data offline.
 
 Rest timers recalculate correctly after returning to the app. Sound and vibration depend on browser support and user interaction; locked-screen alarms are not guaranteed. [Background timer behavior](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API)
 

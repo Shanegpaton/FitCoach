@@ -10,3 +10,5 @@ frontend/playwright-report/
 frontend/public/icons/
 frontend/*.tsbuildinfo
 frontend/.certs/
+frontend/.env.local
+frontend/.env.*.local
