@@ -1,8 +1,82 @@
 # FitCoachGPT
 
-FitCoachGPT is a small Retrieval-Augmented Generation (RAG) application that answers fitness questions using a corpus of scientific papers about resistance training, hypertrophy, nutrition, supplements, concurrent training, and recovery.
+FitCoachGPT is a phone-first workout planner and tracker. Build a routine, log your sets, and see your progress in a dark, installable Progressive Web App (PWA).
 
-The project keeps all chunks, embeddings, and retrieval indexes in memory and uses a local Ollama model for grounded answer generation and evaluation.
+The app stores plans, goals, workout history, and conversations on your device. After the first online load, the workout tracker works offline without your computer.
+
+## Run the PWA
+
+Use Node.js 20.9 or newer (Node 22 recommended) and npm 10.9 or newer:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Open `http://localhost:5173`. For production-build and offline testing:
+
+```bash
+npm run build
+npm run preview
+```
+
+Open `http://localhost:4173` once online, then test offline. Service-worker caching is enabled in the production build, not the development server. Keep using the same origin: development, preview, and different hostnames have separate browser databases.
+
+### What you can do
+
+- Skip or complete a brief training profile, then edit it in Settings.
+- Create, duplicate, reorder, and edit routines with weekday or rotating schedules.
+- Create custom exercises and prescribe sets, reps, optional weights, and rest periods.
+- Log actual weights, reps, optional RPE, warm-ups, supersets, drop sets, and notes.
+- Resume an unfinished session after closing the app; rest timers retain their deadlines.
+- Review session history, exercise benchmarks, weekly sets, workout frequency, and external-load volume.
+- Export and import versioned JSON backups. Invalid imports leave existing data intact.
+
+Today, Plan, Coach, and History are the four primary tabs. Weight progression is user-controlled; previous results are shown as references. Starting weights are never invented, and personal history starts empty. For dumbbells, use combined external load consistently; bodyweight volume counts only added load.
+
+### Coach in this milestone
+
+Coach is a clearly labeled UI demo with sample conversations and editable plan proposals. Review and apply a proposal to save it; proposals do not change your plan automatically. Freeform conversation and live AI are deferred. The typed `ChatAdapter` in `frontend/src/coach.ts` provides the integration point for a future local-model or hosted provider.
+
+The PWA does not currently call Ollama or the Python backend. That existing backend and its scientific corpus remain available separately below.
+
+### Install and test on a phone
+
+A phone must first load the production build from a trusted HTTPS origin. A computer's plain HTTP LAN address does not enable service workers. [Service-worker secure contexts](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API)
+
+For local HTTPS testing, install [mkcert](https://github.com/FiloSottile/mkcert), then run these commands from `frontend/`, replacing the example IP with your computer's LAN IP:
+
+```bash
+mkcert -install
+mkdir -p .certs
+FITCOACH_LAN_IP=192.168.1.100
+mkcert -cert-file .certs/local.pem -key-file .certs/local-key.pem localhost 127.0.0.1 "$FITCOACH_LAN_IP"
+npm run build
+FITCOACH_TLS_CERT=.certs/local.pem FITCOACH_TLS_KEY=.certs/local-key.pem npm run preview
+```
+
+Install and trust **only** mkcert's public `rootCA.pem` certificate on the test phone, following its mobile-device instructions; never share `rootCA-key.pem`. On the same Wi-Fi, open `https://YOUR_LAN_IP:4173`, then add the app to the home screen using Safari's Share menu on iOS or Chrome's Install app menu on Android. Open it once, allow caching to finish, and relaunch in airplane mode. Future static HTTPS hosting can serve `frontend/dist/`; it needs an `index.html` fallback for application routes.
+
+Phone testing initially uses your computer to serve the files. Once cached, plans, logging, and history operate independently. Browser data can be cleared or evicted, so keep exported backups. No account synchronization is implemented.
+
+Rest timers recalculate correctly after returning to the app. Sound and vibration depend on browser support and user interaction; locked-screen alarms are not guaranteed. [Background timer behavior](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API)
+
+### Frontend verification
+
+```bash
+cd frontend
+npm test
+npm run build
+npx playwright install webkit
+npm run test:e2e
+```
+
+Browser tests use installed Google Chrome for desktop and Android-sized emulation, plus Playwright WebKit for iPhone-sized emulation. They cover onboarding, offline logging and reload recovery, proposals, supersets, timers, custom exercises, real history, and backups. Physical iOS/Android installation and device alert behavior should also be checked before release.
+
+## Python RAG Backend
+
+The independent Python backend answers fitness questions using scientific papers about training, nutrition, supplements, and recovery. It provides a command-line interface and a reusable service using local Ollama models. Its Retrieval-Augmented Generation (RAG) pipeline keeps chunks, embeddings, and retrieval indexes in memory.
 
 ## Pipeline
 
@@ -28,9 +102,9 @@ PDF papers
 - Combines dense and BM25 rankings with Reciprocal Rank Fusion
 - Generates cited answers with local `llama3.2` through Ollama
 - Abstains when the retrieved evidence does not support an answer
-- Evaluates Hit Rate@K, MRR, Faithfulness, Answer Relevance, and Context Relevance
+- Includes optional retrieval and answer-quality evaluation
 
-## Requirements
+## Runtime Prerequisites
 
 - Python 3.10 or newer
 - [Ollama](https://ollama.com/)
@@ -107,51 +181,51 @@ I do not have enough evidence in the provided sources.
 
 FitCoachGPT provides educational fitness information and is not a medical diagnosis or treatment system.
 
-## Evaluation
+## Optional Evaluation
 
-The evaluation dataset is `data/eval_dataset.json`. It contains 10 corpus-specific questions with labeled relevant document IDs.
-
-Run the evaluation with:
+The backend includes an optional evaluation command using the labeled questions in `data/eval_dataset.json`:
 
 ```bash
 python fit_coach_gpt.py --evaluate --top-k 5
 ```
 
-Detailed per-question answers, retrieved IDs, and scores are saved to `data/evaluation_results.json`.
+It reports retrieval and answer-quality scores, using Ollama to judge answers, and saves detailed results to `data/evaluation_results.json`.
 
-### Metrics
-
-- **Hit Rate@K:** whether at least one relevant document appears in the top K results
-- **MRR:** reciprocal rank of the first relevant document
-- **Faithfulness:** whether answer claims are supported by retrieved context
-- **Answer Relevance:** whether the answer directly addresses the question
-- **Context Relevance:** whether the retrieved chunks are useful for the question
-
-Retrieval metrics use the labeled document IDs. The three generation metrics use `llama3.2` as an LLM judge with scores from 0.0 to 1.0.
-
-### Current Results
-
-The following results were produced with hybrid retrieval at K=5 over all 10 evaluation questions:
-
-| Metric | Score |
-|---|---:|
-| Hit Rate@5 | 1.000 |
-| MRR | 1.000 |
-| Faithfulness | 0.640 |
-| Answer Relevance | 0.660 |
-| Context Relevance | 0.720 |
-
-Retrieval found a relevant paper at rank 1 for every evaluation question. Two questions retrieved the correct paper but produced the insufficient-evidence response, reducing the generation scores. This suggests that future improvement should focus on selecting more answer-bearing chunks and improving generation reliability rather than document-level retrieval.
-
-LLM-judged metrics may vary slightly between runs, even with temperature set to zero.
-
-## Project Files
+## Project Structure
 
 ```text
-fit_coach_gpt.py             Main ingestion, retrieval, generation, and evaluation code
+frontend/                    React + TypeScript offline PWA
+  src/pages/                 Today, Plan, Workout, Coach, History, Settings
+  src/domain.ts              Shared types and validation schemas
+  src/db.ts                  Local IndexedDB storage and backups
+  src/training.ts            Scheduling, workout flow, and progress calculations
+  src/coach.ts               Replaceable chat interface and sample adapter
+  e2e/                       Browser workflow tests
+fit_coach_gpt.py             Backward-compatible CLI entry point
+fitcoach/
+  cli.py                     Command-line argument handling
+  config.py                  Paths and model defaults
+  models.py                  Shared document and retrieval data models
+  ingestion.py               PDF loading and sentence-aware chunking
+  retrieval.py               Dense, BM25, and hybrid retrieval
+  generation.py              Grounded prompting and Ollama generation
+  evaluation.py              Retrieval and generation evaluation
+  reporting.py               Human-readable CLI output
+  service.py                 Reusable API for a future UI or agent
 requirements.txt             Python dependencies
 data/documents/              PDF corpus
 data/manifest.csv            Source metadata
 data/eval_dataset.json       Evaluation questions and relevance labels
 data/evaluation_results.json Detailed evaluation output
+```
+
+The existing CLI commands are unchanged. Application code can initialize the
+pipeline once and reuse it across requests:
+
+```python
+from fitcoach import FitCoachService
+
+coach = FitCoachService().initialize()
+result = coach.answer("How much protein should I eat?")
+print(result.text)
 ```

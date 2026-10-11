@@ -1,0 +1,40 @@
+{
+  "name": "fitcoach-pwa",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run icons && vite --host 0.0.0.0",
+    "build": "npm run icons && tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "icons": "node scripts/icons.mjs",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "dexie": "^4.0.11",
+    "dexie-react-hooks": "^1.1.7",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router": "^7.1.0",
+    "recharts": "^3.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.51.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "fake-indexeddb": "^6.0.0",
+    "sharp": "^0.35.5",
+    "typescript": "~5.8.3",
+    "vite": "~6.4.1",
+    "vite-plugin-pwa": "1.0.3",
+    "vitest": "~4.1.11"
+  },
+  "overrides": {
+    "workbox-build": "7.4.1"
+  }
+}
