@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { Exercise, Message, Plan, Profile, Proposal, ScheduleOverride, Session } from './domain';
-import { db } from './db';
+import { db, enqueueChange } from './db';
 
 export interface AppData {
   profile: Profile; exercises: Exercise[]; plans: Plan[]; sessions: Session[];
@@ -17,10 +17,11 @@ export function useApp() {
   return value;
 }
 export async function updateSession(id: string, update: (session: Session) => void) {
-  await db.transaction('rw', db.sessions, async () => {
+  await db.transaction('rw', [db.sessions, db.outbox], async () => {
     const session = await db.sessions.get(id);
     if (!session) throw new Error('Workout not found');
     update(session);
     await db.sessions.put(session);
+    await enqueueChange('sessions', id, 'upsert', session);
   });
 }

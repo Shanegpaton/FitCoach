@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TrainingDB, applyProposal, createSession, exportBackup, finishSession, importBackup, initialize, savePlan } from './db';
+import { TrainingDB, applyProposal, createSession, exportBackup, finishSession, importBackup, importLegacyData, initialize, savePlan } from './db';
 import { catalog, starterPlan } from './catalog';
 import { backupSchema, defaultProfile, uid, type Proposal } from './domain';
 import { startSession } from './training';
@@ -10,6 +10,19 @@ beforeEach(async () => { db = new TrainingDB(`test-${uid()}`); await initialize(
 afterEach(async () => { vi.restoreAllMocks(); await db.delete(); });
 
 describe('durable local data', () => {
+  it('keeps account databases isolated and copies anonymous data without deleting the source', async () => {
+    const legacy = new TrainingDB(`legacy-${uid()}`); const accountA = new TrainingDB(`account-a-${uid()}`, 'user-a'); const accountB = new TrainingDB(`account-b-${uid()}`, 'user-b');
+    await initialize(legacy); await legacy.profile.put({ ...(await legacy.profile.get('profile'))!, goals: 'Keep this plan' });
+    const sourceBefore = await exportBackup(legacy);
+    await initialize(accountA); await importLegacyData(accountA, legacy);
+    expect((await accountA.profile.get('profile'))?.goals).toBe('Keep this plan');
+    expect(await accountA.outbox.where('entity').equals('backup').count()).toBe(1);
+    const sourceAfter = await exportBackup(legacy);
+    expect(sourceAfter.profile).toEqual(sourceBefore.profile); expect(sourceAfter.exercises).toEqual(sourceBefore.exercises);
+    await initialize(accountB);
+    expect((await accountB.profile.get('profile'))?.goals).toBe('');
+    await Promise.all([legacy.delete(), accountA.delete(), accountB.delete()]);
+  });
   it('initializes a catalog without fabricating history and preserves catalog edits', async () => {
     expect(await db.sessions.count()).toBe(0); expect(await db.plans.count()).toBe(0);
     await db.exercises.update('ex-squat', { name: 'My squat' }); await initialize(db);

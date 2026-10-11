@@ -9,5 +9,6 @@ export default defineConfig({
     { name: 'phone-webkit', use: { ...devices['iPhone 13'], browserName: 'webkit' } },
     { name: 'desktop-chrome', use: { browserName: 'chromium', channel: 'chrome', viewport: { width: 1440, height: 1000 } } },
   ],
-  webServer: { command: 'npm run build && npm run preview', url: 'http://localhost:4173', reuseExistingServer: !process.env.CI, timeout: 120000 },
+  webServer: { command: 'npm run build && npm run preview', url: 'http://localhost:4173', reuseExistingServer: !process.env.CI, timeout: 120000,
+    env: { VITE_SUPABASE_URL: 'https://fitcoach-e2e.supabase.co', VITE_SUPABASE_ANON_KEY: 'e2e-public-key' } },
 });

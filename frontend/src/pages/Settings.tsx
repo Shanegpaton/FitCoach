@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowRight, Check, Download, HardDrive, ShieldCheck, Smartphone, Upload } from 'lucide-react';
 import { Link } from 'react-router';
 import { backupSchema, type Backup, type Profile } from '../domain';
-import { db, exportBackup, importBackup } from '../db';
+import { db, exportBackup, importBackup, putLocalChange } from '../db';
 import { useApp } from '../state';
 import { Days, Modal, SectionTitle } from '../ui';
 
@@ -16,10 +16,10 @@ function TrainingFields({ value, onChange }: { value: Profile; onChange: (profil
 
 export function Onboarding() {
   const { profile, run } = useApp(); const [step, setStep] = useState(0); const [draft, setDraft] = useState(profile);
-  const save = () => run(() => db.profile.put({ ...draft, onboardingDone: true }));
-  return <Modal title="Welcome to your training space" onClose={() => run(() => db.profile.put({ ...profile, onboardingDone: true })).then(() => undefined)}><div className="onboarding-progress"><span className={step === 0 ? 'selected' : ''} /><span className={step === 1 ? 'selected' : ''} /></div>
+  const save = () => run(() => putLocalChange('profile', { ...draft, onboardingDone: true }, db.profile));
+  return <Modal title="Welcome to your training space" onClose={() => run(() => putLocalChange('profile', { ...profile, onboardingDone: true }, db.profile)).then(() => undefined)}><div className="onboarding-progress"><span className={step === 0 ? 'selected' : ''} /><span className={step === 1 ? 'selected' : ''} /></div>
     {step === 0 ? <div className="onboarding-intro"><span className="brand-mark large">f.</span><h2>A plan that fits.<br /><span className="text-accent">Progress that lasts.</span></h2><p>Make a little space for your goals. We’ll keep your workouts and history right here, on your device.</p><button className="button primary" onClick={() => setStep(1)}>Set up my profile<ArrowRight size={18} /></button></div> : <form onSubmit={e => { e.preventDefault(); void save(); }}><TrainingFields value={draft} onChange={setDraft} /><button className="button primary" type="submit">Let’s get started<ArrowRight size={18} /></button></form>}
-    <button className="text-button onboarding-skip" onClick={() => run(() => db.profile.put({ ...profile, onboardingDone: true }))}>Skip for now</button><p className="field-hint centered">You can change these details anytime in Settings.</p>
+    <button className="text-button onboarding-skip" onClick={() => run(() => putLocalChange('profile', { ...profile, onboardingDone: true }, db.profile))}>Skip for now</button><p className="field-hint centered">You can change these details anytime in Settings.</p>
   </Modal>;
 }
 
@@ -28,7 +28,7 @@ export function Settings() {
   const [draft, setDraft] = useState(profile);
   const [backup, setBackup] = useState<Backup | null>(null);
   const [busy, setBusy] = useState(false);
-  const save = (e: FormEvent) => { e.preventDefault(); void run(() => db.profile.put({ ...draft, onboardingDone: true }), 'Profile saved'); };
+  const save = (e: FormEvent) => { e.preventDefault(); void run(() => putLocalChange('profile', { ...draft, onboardingDone: true }, db.profile), 'Profile saved'); };
   const exportFile = async () => {
     await run(async () => {
       const backup = await exportBackup();

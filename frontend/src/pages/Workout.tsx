@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, CheckCheck, ChevronDown, Clock3, Dumbbell, Minus, Pause, Pencil, Play, Plus, RotateCcw, SkipForward, Trash2 } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { db } from '../db';
+import { db, deleteLocalChange } from '../db';
 import { atNoon, formatLoad, newSet, sessionSchema, toKg, uid, type LoggedSet, type Profile, type Session, type Timer } from '../domain';
 import { completedStats, lastPerformance, nextSet, restAfterSet, timerRemaining } from '../training';
 import { finishSession } from '../db';
@@ -99,7 +99,7 @@ export function WorkoutPage() {
     {editable && <button className="button dashed" onClick={() => setSubstitute('new')}><Plus size={18} />Add exercise to this session</button>}
     {editable ? <label className="notes-label session-notes">Workout notes<textarea key={`${session.id}-session-notes`} defaultValue={session.notes} rows={2} placeholder="A little context for next time." onBlur={e => update(s => { s.notes = e.target.value; })} /></label> : session.notes && <p className="card-note">{session.notes}</p>}
     {active && <><div className="session-actions"><button className="button secondary" onClick={() => { unlockAudio(); setTimerSetup(true); }}><Clock3 size={18} />Rest timer</button><button className="button primary" onClick={() => setConfirmFinish(true)}>Finish workout<CheckCheck size={18} /></button></div><button className="text-button danger" onClick={async () => {
-      if (window.confirm('Discard this unfinished workout and its logged sets?')) if (await run(() => db.sessions.delete(session.id))) navigate('/');
+      if (window.confirm('Discard this unfinished workout and its logged sets?')) if (await run(() => deleteLocalChange('sessions', session.id, db.sessions))) navigate('/');
     }}><Trash2 size={15} />Discard session</button></>}
     {active && session.timer && <RestTimer timer={session.timer} onChange={timer => update(s => { s.timer = timer; })} onExpire={() => notify('Rest complete. Ready for your next set.')} />}
     {timerSetup && <Modal title="Rest timer" onClose={() => setTimerSetup(false)}><label>Duration (seconds)<input type="number" inputMode="numeric" min={1} max={1800} value={duration} onChange={e => setDuration(Number(e.target.value))} /></label><div className="chip-row">{[60, 90, 120, 180].map(seconds => <button className={`chip ${duration === seconds ? 'selected' : ''}`} key={seconds} onClick={() => setDuration(seconds)}>{seconds}s</button>)}</div><p className="field-hint">The timer resumes accurately when you return. Sound and vibration work while the app is open; locked-screen alerts depend on your browser.</p><button className="button primary" onClick={async () => { if (duration < 1 || duration > 1800) return; if (await update(s => { s.timer = { duration, remaining: duration, endAt: Date.now() + duration * 1000 }; })) setTimerSetup(false); }}><Play size={18} />Start timer</button></Modal>}

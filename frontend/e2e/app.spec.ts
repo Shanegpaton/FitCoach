@@ -1,5 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('sb-fitcoach-e2e-auth-token', JSON.stringify({
+      access_token: 'offline-test-access-token', refresh_token: 'offline-test-refresh-token', token_type: 'bearer',
+      expires_in: 3600, expires_at: 4102444800,
+      user: { id: 'e2e-user', aud: 'authenticated', role: 'authenticated', email: 'tester@example.com', app_metadata: { provider: 'google', providers: ['google'] }, user_metadata: {}, created_at: '2026-01-01T00:00:00.000Z' },
+    }));
+  });
+});
+
 async function openApp(page: Page) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Skip for now' }).click();

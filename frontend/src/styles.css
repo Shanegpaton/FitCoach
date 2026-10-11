@@ -385,3 +385,12 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+.auth-screen { min-height: 100dvh; max-width: 440px; margin: 0 auto; padding: max(56px, env(safe-area-inset-top)) 24px max(32px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; justify-content: center; align-items: stretch; background: var(--bg); }
+.auth-screen > .brand-mark { align-self: center; margin-bottom: 26px; }
+.auth-screen > .eyebrow { text-align: center; }
+.auth-screen h1 { text-align: center; font-size: clamp(38px, 10vw, 52px); line-height: 1.08; margin: 13px 0 18px; }
+.auth-screen > p { text-align: center; color: #afbc9f; font-size: 14px; line-height: 1.6; margin: 0 0 24px; }
+.auth-screen .google-signin { justify-content: center; gap: 12px; min-height: 52px; }
+.auth-config { display: grid; gap: 6px; border: 1px solid #46553d; border-radius: 12px; padding: 14px; margin: 0 0 14px; background: #191e18; color: #c5d2bb; font-size: 12px; line-height: 1.5; }
+.auth-config strong { color: var(--text); font-size: 13px; }
+.auth-screen .auth-error { color: #ff9d91; margin-top: 16px; }

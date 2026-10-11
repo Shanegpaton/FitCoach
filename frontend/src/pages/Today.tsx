@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowRight, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Clock3, Dumbbell, Flame, MoveRight, Plus, Sparkles } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
-import { createSession, db } from '../db';
+import { createSession, db, putLocalChange } from '../db';
 import { atNoon, localDate, uid, weekdayNames, type Workout } from '../domain';
 import { completedStats, scheduledWorkout, startSession, weeklyStats } from '../training';
 import { useApp } from '../state';
@@ -54,7 +54,8 @@ export function Today() {
       if (conflict) { await run(async () => { throw new Error('That day already has a workout. Choose a rest day.'); }); return; }
       if (await run(async () => {
         const existing = overrides.find(o => o.planId === plan.id && o.workoutId === workout.id && o.date === date);
-        await db.overrides.put({ id: existing?.id ?? uid(), planId: plan.id, workoutId: workout.id, originalDate: existing?.originalDate ?? date, date: moveDate });
+        const override = { id: existing?.id ?? uid(), planId: plan.id, workoutId: workout.id, originalDate: existing?.originalDate ?? date, date: moveDate };
+        await putLocalChange('overrides', override, db.overrides);
       }, 'Workout moved')) { setMoving(false); setDate(moveDate); }
     }}>Move workout<ArrowRight size={18} /></button></Modal>}
   </div>;

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArrowDown, ArrowRight, ArrowUp, Check, ChevronRight, Copy, Dumbbell, Library, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
-import { db, savePlan } from '../db';
+import { db, putLocalChange, savePlan } from '../db';
 import { starterPlan } from '../catalog';
 import { exerciseSchema, formatLoad, newBlock, newPlan, newSet, normalizeDropChains, toKg, uid, type Block, type Exercise, type Plan } from '../domain';
 import { useApp } from '../state';
@@ -112,7 +112,7 @@ export function ExercisePicker({ onChoose, onClose }: { onChoose: (exercise: Exe
 
 function ExerciseForm({ initial, onClose, onSaved }: { initial: Exercise; onClose: () => void; onSaved: (exercise: Exercise) => void }) {
   const { run } = useApp(); const [exercise, setExercise] = useState(initial);
-  return <Modal title={initial.name ? 'Edit exercise' : 'Custom exercise'} onClose={onClose}><label>Name<input value={exercise.name} maxLength={100} onChange={e => setExercise({ ...exercise, name: e.target.value })} /></label><div className="form-grid"><label>Muscle group<input value={exercise.muscle} onChange={e => setExercise({ ...exercise, muscle: e.target.value })} /></label><label>Equipment<input value={exercise.equipment} onChange={e => setExercise({ ...exercise, equipment: e.target.value })} /></label></div><label>Load type<select value={exercise.loadMode} onChange={e => setExercise({ ...exercise, loadMode: e.target.value as Exercise['loadMode'] })}><option value="external">External weight</option><option value="bodyweight">Bodyweight (+ optional added weight)</option></select></label><p className="field-hint">For dumbbells, enter the combined external load consistently. Bodyweight volume counts only added weight.</p><button className="button primary" onClick={() => run(async () => { const valid = exerciseSchema.parse(exercise); await db.exercises.put(valid); onSaved(valid); }, 'Exercise saved')}>Save exercise<Check size={18} /></button></Modal>;
+  return <Modal title={initial.name ? 'Edit exercise' : 'Custom exercise'} onClose={onClose}><label>Name<input value={exercise.name} maxLength={100} onChange={e => setExercise({ ...exercise, name: e.target.value })} /></label><div className="form-grid"><label>Muscle group<input value={exercise.muscle} onChange={e => setExercise({ ...exercise, muscle: e.target.value })} /></label><label>Equipment<input value={exercise.equipment} onChange={e => setExercise({ ...exercise, equipment: e.target.value })} /></label></div><label>Load type<select value={exercise.loadMode} onChange={e => setExercise({ ...exercise, loadMode: e.target.value as Exercise['loadMode'] })}><option value="external">External weight</option><option value="bodyweight">Bodyweight (+ optional added weight)</option></select></label><p className="field-hint">For dumbbells, enter the combined external load consistently. Bodyweight volume counts only added weight.</p><button className="button primary" onClick={() => run(async () => { const valid = exerciseSchema.parse(exercise); await putLocalChange('exercises', valid, db.exercises); onSaved(valid); }, 'Exercise saved')}>Save exercise<Check size={18} /></button></Modal>;
 }
 
 function ExerciseLibrary({ onClose }: { onClose: () => void }) {
