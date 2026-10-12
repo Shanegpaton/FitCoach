@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowRight, Check, Download, HardDrive, ShieldCheck, Smartphone, Upload } from 'lucide-react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { ArrowLeft, ArrowRight, Check, Download, HardDrive, RefreshCw, ShieldCheck, Smartphone, Upload } from 'lucide-react';
 import { Link } from 'react-router';
 import { backupSchema, type Backup, type Profile } from '../domain';
 import { db, exportBackup, importBackup, putLocalChange } from '../db';
+import { resolveConflict } from '../sync';
 import { useApp } from '../state';
 import { Days, Modal, SectionTitle } from '../ui';
 
@@ -28,6 +30,15 @@ export function Settings() {
   const [draft, setDraft] = useState(profile);
   const [backup, setBackup] = useState<Backup | null>(null);
   const [busy, setBusy] = useState(false);
+  const syncItems = useLiveQuery(async () => db.ownerId ? Promise.all([
+    db.outbox.where('userId').equals(db.ownerId).toArray(),
+    db.sync.where('userId').equals(db.ownerId).toArray(),
+  ]) : [[], []], [db.name]);
+  const pendingSync = syncItems?.[0] ?? [];
+  const syncRecords = syncItems?.[1] ?? [];
+  const conflicts = syncRecords.filter(item => item.kind === 'conflict');
+  const recoveries = syncRecords.filter(item => item.kind === 'recovery');
+  const syncState = syncRecords.find(item => item.kind === 'state');
   const save = (e: FormEvent) => { e.preventDefault(); void run(() => putLocalChange('profile', { ...draft, onboardingDone: true }, db.profile), 'Profile saved'); };
   const exportFile = async () => {
     await run(async () => {
@@ -39,7 +50,16 @@ export function Settings() {
   };
   return <div className="page settings-page"><Link to="/" className="text-button"><ArrowLeft size={17} />Back to Today</Link><div className="page-heading compact-heading"><span className="eyebrow">MAKE IT YOURS</span><h1>Your space.</h1><p>A few details. A better starting point.</p></div>
     <form className="settings-card" onSubmit={save}><SectionTitle title="Training profile" /><TrainingFields value={draft} onChange={setDraft} /><button className="button primary" type="submit">Save profile<Check size={18} /></button></form>
-    <section className="settings-card"><SectionTitle title="Your data"><HardDrive size={20} /></SectionTitle><div className="privacy-note"><ShieldCheck size={20} /><p>Plans, workouts, goals, and chats stay in this browser on this device. Export a backup before changing phones or clearing browser data.</p></div><div className="action-row"><button className="button secondary" onClick={exportFile}><Download size={17} />Export backup</button><label className="button secondary file-button"><Upload size={17} />Import backup<input type="file" accept="application/json,.json" aria-label="Import backup" onChange={async e => {
+    <section className="settings-card"><SectionTitle title="Synchronization"><HardDrive size={20} /></SectionTitle><div className="privacy-note"><ShieldCheck size={20} /><p>Every change saves on this device first. When you’re online and signed in, your plans and workouts sync to your account. Export a backup before changing phones or clearing browser data.</p></div>
+      <p role="status">{pendingSync.length ? `${pendingSync.length} change${pendingSync.length === 1 ? '' : 's'} pending or awaiting resolution.` : 'No local changes are waiting to upload.'}</p>
+      <p className="field-hint">{syncState?.updatedAt ? `Last sync activity: ${new Date(syncState.updatedAt).toLocaleString()}` : 'This account has not synchronized on this device yet.'}</p>
+      <button className="button secondary" onClick={() => window.dispatchEvent(new Event('fitcoach:sync-now'))}><RefreshCw size={16} />Sync now</button>
+      {conflicts.length > 0 && <div className="sync-conflicts"><SectionTitle title="Choose how to resolve" /><p className="field-hint">Both copies are preserved until you choose. Workout set data is never merged or discarded automatically.</p>{conflicts.map(conflict => <article className="sync-conflict" key={conflict.id}><strong>{conflict.entity} · {conflict.entityId}</strong><p>{conflict.reason}</p><div className="action-row"><button className="button secondary" onClick={() => run(() => resolveConflict(db, conflict.id, 'keep-both'), conflict.entity === 'profile' ? 'Your profile changes are queued.' : 'Both copies have been preserved.')}>{conflict.entity === 'profile' ? 'Keep my changes' : 'Keep both copies'}</button><button className="button secondary" onClick={() => run(() => resolveConflict(db, conflict.id, 'use-cloud'), 'Cloud copy restored')}>Use cloud copy</button></div></article>)}</div>}
+      {recoveries.length > 0 && <details className="recovery-list"><summary>{recoveries.length} recovery cop{recoveries.length === 1 ? 'y' : 'ies'} saved</summary>{recoveries.map(item => <div className="recovery-row" key={item.id}><span>{item.entity} · {item.entityId} · {item.reason}</span><button className="text-button" onClick={() => {
+        const blob = new Blob([JSON.stringify({ entity: item.entity, entityId: item.entityId, reason: item.reason, payload: item.payload }, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `fitcoach-recovery-${item.entityId}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }}>Download copy</button></div>)}</details>}
+      <div className="action-row"><button className="button secondary" onClick={exportFile}><Download size={17} />Export backup</button><label className="button secondary file-button"><Upload size={17} />Import backup<input type="file" accept="application/json,.json" aria-label="Import backup" onChange={async e => {
       const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
       await run(async () => {
         if (file.size > 20 * 1024 * 1024) throw new Error('Backup is too large. Choose a file under 20 MB.');

@@ -121,3 +121,20 @@ export function useAuth() {
   if (!auth) throw new Error('Authentication state unavailable');
   return auth;
 }
+
+export async function getSyncAccessToken(forceRefresh = false, expectedUserId?: string): Promise<string | null> {
+  if (!supabase) return null;
+  if (forceRefresh) {
+    const { data, error } = await supabase.auth.refreshSession();
+    if (error) return null;
+    return data.session && (!expectedUserId || data.session.user.id === expectedUserId)
+      ? data.session.access_token : null;
+  }
+  const { data } = await supabase.auth.getSession();
+  const session = data.session;
+  if (!session || (expectedUserId && session.user.id !== expectedUserId)) return null;
+  if (!session.expires_at || session.expires_at * 1000 > Date.now() + 60_000) return session.access_token;
+  const { data: refreshed, error } = await supabase.auth.refreshSession();
+  return error || (expectedUserId && refreshed.session?.user.id !== expectedUserId)
+    ? null : refreshed.session?.access_token ?? null;
+}

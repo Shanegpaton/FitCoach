@@ -16,7 +16,8 @@ describe('durable local data', () => {
     const sourceBefore = await exportBackup(legacy);
     await initialize(accountA); await importLegacyData(accountA, legacy);
     expect((await accountA.profile.get('profile'))?.goals).toBe('Keep this plan');
-    expect(await accountA.outbox.where('entity').equals('backup').count()).toBe(1);
+    expect(await accountA.outbox.where('entity').equals('profile').count()).toBe(1);
+    expect(await accountA.outbox.where('entity').equals('backup').count()).toBe(0);
     const sourceAfter = await exportBackup(legacy);
     expect(sourceAfter.profile).toEqual(sourceBefore.profile); expect(sourceAfter.exercises).toEqual(sourceBefore.exercises);
     await initialize(accountB);
@@ -33,11 +34,12 @@ describe('durable local data', () => {
     await savePlan({ ...a, active: true }, db); await savePlan({ ...b, active: true }, db);
     expect((await db.plans.toArray()).filter(p => p.active).map(p => p.id)).toEqual([b.id]);
   });
-  it('rejects a second concurrent active workout', async () => {
+  it('preserves separate active workouts started offline on different devices', async () => {
     const p = starterPlan(defaultProfile);
     await createSession(startSession(p, p.workouts[0], catalog), db);
-    await expect(createSession(startSession(p, p.workouts[1], catalog), db)).rejects.toThrow(/active workout/);
-    expect(await db.sessions.count()).toBe(1);
+    await createSession({ ...startSession(p, p.workouts[1], catalog), id: 'second-offline-session' }, db);
+    expect(await db.sessions.where('status').equals('active').count()).toBe(2);
+    expect(await db.sessions.count()).toBe(2);
   });
   it('finishing a rotation advances once and uses the latest persisted sets', async () => {
     const p = starterPlan(defaultProfile); p.schedule = 'rotation'; await savePlan(p, db);

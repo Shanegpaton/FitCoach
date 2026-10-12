@@ -17,7 +17,7 @@ export function useApp() {
   return value;
 }
 export async function updateSession(id: string, update: (session: Session) => void) {
-  await db.transaction('rw', [db.sessions, db.outbox], async () => {
+  await db.transaction('rw', [db.sessions, db.outbox, db.sync], async () => {
     const session = await db.sessions.get(id);
     if (!session) throw new Error('Workout not found');
     update(session);

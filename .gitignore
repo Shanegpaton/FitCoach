@@ -1,6 +1,9 @@
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+backend/.env.local
+backend/.env.*.local
 
 # Mobile frontend
 frontend/node_modules/

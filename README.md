@@ -29,7 +29,9 @@ In Supabase, enable Google under **Authentication → Providers** and add the Go
 
 The PWA uses the PKCE flow and persists the Supabase session in browser storage. A returning account can open its local plans and log workouts offline even when its token cannot be refreshed. Signing out clears the active auth session but keeps that account’s local database gated from other accounts. Existing anonymous `fitcoach-v1` data is offered for explicit import into an account; the source database remains intact.
 
-Local changes are recorded in a per-account IndexedDB outbox. The repository does not yet contain a FastAPI HTTP application or authenticated synchronization endpoint, so the outbox is groundwork and is not uploaded or drained. Cross-device sync requires that backend and its JWT verification and sync API.
+Local changes are recorded in a per-account IndexedDB outbox and uploaded to the authenticated FastAPI training API when connectivity is available. The PWA downloads incremental account changes, uses server ETags to surface conflicts, and keeps recovery copies before deletes or conflict resolution. Workouts continue saving locally while offline. Existing anonymous data still requires explicit import; cloud-only data is preserved during first sync and backup import.
+
+Set `VITE_FITCOACH_API_URL` in `frontend/.env.local` to the training API origin (for local development, `http://localhost:8000`). Supabase access tokens authenticate sync requests. The API must allow the PWA origin in `FITCOACH_CORS_ORIGINS`; see [the API guide](backend/README.md).
 
 Open `http://localhost:4173` once online, then test offline. Service-worker caching is enabled in the production build, not the development server. Keep using the same origin: development, preview, and different hostnames have separate browser databases.
 
@@ -83,6 +85,20 @@ npm run test:e2e
 ```
 
 Browser tests use installed Google Chrome for desktop and Android-sized emulation, plus Playwright WebKit for iPhone-sized emulation. They cover onboarding, offline logging and reload recovery, proposals, supersets, timers, custom exercises, real history, and backups. Physical iOS/Android installation and device alert behavior should also be checked before release.
+
+## Relational training API
+
+The independent `backend/` application uses FastAPI, SQLAlchemy 2, Psycopg 3 and Alembic with Supabase PostgreSQL. It verifies Supabase Auth bearer tokens and provides profiles, owned exercises, a shared exercise catalog, nested plans and session snapshots, and schedule overrides. A private schema, forced row-level security, ownership foreign keys, transactional writes, soft deletion and ETag preconditions protect account data and workout history.
+
+Install its dependencies separately from the RAG requirements:
+
+```bash
+pip install -r backend/requirements-dev.txt
+```
+
+Follow [the API setup and verification guide](backend/README.md) to provision a restricted runtime role, configure separate runtime/migration connection URLs, apply Alembic migrations, start Uvicorn, and make authenticated requests. Hosted PostgreSQL connections require TLS; use Supabase's direct connection or its session pooler for IPv4 environments. The guide also describes disposable PostgreSQL and Supabase development migration tests.
+
+The API starts without loading embeddings or Ollama. Conversations, proposals, live Coach integration, automatic anonymous-data import, and production deployment remain deferred. Backend availability does not gate local workout entry. Multiple active sessions are allowed in the cloud so simultaneous offline workouts from different devices cannot reject one another's recorded sets.
 
 ## Python RAG Backend
 
@@ -211,6 +227,13 @@ frontend/                    React + TypeScript offline PWA
   src/training.ts            Scheduling, workout flow, and progress calculations
   src/coach.ts               Replaceable chat interface and sample adapter
   e2e/                       Browser workflow tests
+backend/                     Independent FastAPI relational training API
+  app.py                     Authenticated HTTP endpoints and ETags
+  domain.py                  Frontend-compatible request/response validation
+  schema.py                  SQLAlchemy relational tables and constraints
+  store.py                   Transactional aggregate writes and document assembly
+  migrations/                Alembic schema, RLS, metadata triggers and catalog seed
+  tests/                     Unit and restricted-role PostgreSQL integration tests
 fit_coach_gpt.py             Backward-compatible CLI entry point
 fitcoach/
   cli.py                     Command-line argument handling

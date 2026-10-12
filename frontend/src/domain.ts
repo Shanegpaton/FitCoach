@@ -92,8 +92,6 @@ export const backupSchema = z.object({
     }
   }
   if (backup.plans.filter(plan => plan.active).length > 1) ctx.addIssue({ code: 'custom', message: 'Multiple active plans' });
-  if (backup.sessions.filter(session => session.status === 'active').length > 1)
-    ctx.addIssue({ code: 'custom', message: 'Multiple active workouts' });
   for (const override of backup.overrides) {
     if (!backup.plans.some(plan => plan.id === override.planId && plan.workouts.some(w => w.id === override.workoutId)))
       ctx.addIssue({ code: 'custom', message: 'Schedule override references a missing workout' });

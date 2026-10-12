@@ -15,7 +15,8 @@ export function Today() {
   const [moveDate, setMoveDate] = useState(localDate());
   const plan = plans.find(p => p.active);
   const workout = plan && scheduledWorkout(plan, date, overrides);
-  const active = sessions.find(s => s.status === 'active');
+  const activeSessions = sessions.filter(s => s.status === 'active').sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  const active = activeSessions[0];
   const completed = sessions.filter(s => s.status === 'completed');
   const week = weeklyStats(sessions, 1)[0];
   const start = async (workout: Workout) => {
@@ -35,7 +36,7 @@ export function Today() {
       return <button key={iso} className={`${iso === date ? 'selected' : ''} ${iso === localDate() ? 'is-today' : ''}`} aria-label={d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} aria-pressed={iso === date} onClick={() => setDate(iso)}><span>{weekdayNames[d.getDay()]}</span><strong>{d.getDate()}</strong><i className={logged ? 'logged' : scheduled ? 'planned' : ''} /></button>;
     })}</div>
     <SectionTitle eyebrow={plan?.schedule === 'rotation' ? 'UP NEXT IN YOUR ROTATION' : date === localDate() ? 'YOUR TRAINING TODAY' : 'YOUR TRAINING'} title={active ? 'Pick up where you left off' : 'On the schedule'} />
-    {active ? <div className="workout-hero"><span className="pill"><span className="pulse" />In progress</span><h2>{active.name}</h2><p>{active.blocks.length} exercises · {active.blocks.flatMap(b => b.sets).filter(s => s.done).length} sets logged</p><Link to={`/workout/${active.id}`} className="button primary">Resume workout<ArrowRight size={20} /></Link></div>
+    {active ? <div className="workout-hero"><span className="pill"><span className="pulse" />In progress</span><h2>{active.name}</h2><p>{active.blocks.length} exercises · {active.blocks.flatMap(b => b.sets).filter(s => s.done).length} sets logged</p><Link to={`/workout/${active.id}`} className="button primary">Resume workout<ArrowRight size={20} /></Link>{activeSessions.length > 1 && <div className="other-active"><span className="eyebrow">OTHER WORKOUTS IN PROGRESS</span>{activeSessions.slice(1).map(item => <Link key={item.id} to={`/workout/${item.id}`}>{item.name} · {item.blocks.flatMap(b => b.sets).filter(s => s.done).length} sets logged<ArrowUpRight size={16} /></Link>)}</div>}</div>
       : workout ? <div className="workout-hero"><div className="hero-top"><span className="pill"><Dumbbell size={14} />{plan!.name}</span><span className="hero-number">{String(plan!.workouts.indexOf(workout) + 1).padStart(2, '0')}</span></div>
         <h2>{workout.name}</h2><div className="hero-meta"><span><Dumbbell size={15} />{workout.blocks.length} exercises</span><span><Clock3 size={15} />{profile.sessionMinutes} min target</span></div>
         <div className="hero-exercises">{workout.blocks.slice(0, 3).map(b => <span key={b.id}>{exercises.find(ex => ex.id === b.exerciseId)?.name}</span>)}{workout.blocks.length > 3 && <span>+{workout.blocks.length - 3} more</span>}</div>
