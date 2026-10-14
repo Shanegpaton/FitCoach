@@ -98,7 +98,7 @@ pip install -r backend/requirements-dev.txt
 
 Follow [the API setup and verification guide](backend/README.md) to provision a restricted runtime role, configure separate runtime/migration connection URLs, apply Alembic migrations, start Uvicorn, and make authenticated requests. Hosted PostgreSQL connections require TLS; use Supabase's direct connection or its session pooler for IPv4 environments. The guide also describes disposable PostgreSQL and Supabase development migration tests.
 
-The API starts without loading embeddings or Ollama. The API can deploy as a Vercel Python Function from the repository root; see [the Vercel deployment steps](backend/README.md#deploy-the-api-on-vercel). Conversations, proposals, live Coach integration, and automatic anonymous-data import remain deferred. Backend availability does not gate local workout entry. Multiple active sessions are allowed in the cloud so simultaneous offline workouts from different devices cannot reject one another's recorded sets.
+The API starts without loading embeddings or Ollama. The API can deploy as a Vercel Python Function with `backend/` as its project root; see [the Vercel deployment steps](backend/README.md#deploy-the-api-on-vercel). Conversations, proposals, live Coach integration, and automatic anonymous-data import remain deferred. Backend availability does not gate local workout entry. Multiple active sessions are allowed in the cloud so simultaneous offline workouts from different devices cannot reject one another's recorded sets.
 
 ## Python RAG Backend
 
@@ -143,7 +143,7 @@ Create and activate a virtual environment:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-rag.txt
+pip install -r requirements.txt
 ```
 
 Download and start the Ollama model:
@@ -229,6 +229,9 @@ frontend/                    React + TypeScript offline PWA
   e2e/                       Browser workflow tests
 backend/                     Independent FastAPI relational training API
   app.py                     Authenticated HTTP endpoints and ETags
+  index.py                   Vercel FastAPI entry point
+  requirements.txt           API function dependencies
+  vercel.json                API function bundle configuration
   domain.py                  Frontend-compatible request/response validation
   schema.py                  SQLAlchemy relational tables and constraints
   store.py                   Transactional aggregate writes and document assembly
@@ -245,8 +248,7 @@ fitcoach/
   evaluation.py              Retrieval and generation evaluation
   reporting.py               Human-readable CLI output
   service.py                 Reusable API for a future UI or agent
-requirements.txt             Training API deployment dependencies
-requirements-rag.txt         Independent Python RAG dependencies
+requirements.txt             Independent Python RAG dependencies
 data/documents/              PDF corpus
 data/manifest.csv            Source metadata
 data/eval_dataset.json       Evaluation questions and relevance labels

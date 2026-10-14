@@ -1,8 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "app.py": {
-      "excludeFiles": "{frontend/**,fitcoach/**,data/**,backend/tests/**,backend/migrations/**,**/.env,**/.env.*,**/__pycache__/**,**/.pytest_cache/**}"
-    }
-  }
-}

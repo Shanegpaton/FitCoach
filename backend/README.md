@@ -42,7 +42,7 @@ Alembic is the sole migration system. It creates the private `fitcoach` schema, 
 
 ## Deploy the API on Vercel
 
-Create a **separate Vercel project** for the API from the same repository as the PWA. Set its Root Directory to the repository root (`.`) and use the FastAPI framework preset. The root `app.py` exports the API for Vercel; `requirements.txt` installs only the training API dependencies. The separate RAG dependencies are in `requirements-rag.txt`. The function configuration excludes frontend, RAG, test, migration, and local env files from the function bundle. No custom build command or output directory is needed.
+Create a **separate Vercel project** for the API from the same repository as the PWA. Set its Root Directory to `backend` and use the FastAPI framework preset. `backend/index.py` exports the API for Vercel; `backend/requirements.txt` installs only the training API runtime dependencies. The function configuration excludes tests, migrations, and local env files from its bundle. No custom build command or output directory is needed. The frontend Vercel project continues to use `frontend` as its Root Directory.
 
 In the API project's Vercel environment settings, set:
 

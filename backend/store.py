@@ -8,9 +8,14 @@ import sqlalchemy as sa
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend import schema as s
-from backend.database import lock_user_mutations
-from backend.domain import Plan, Session
+if __package__:
+    from . import schema as s
+    from .database import lock_user_mutations
+    from .domain import Plan, Session
+else:
+    import schema as s
+    from database import lock_user_mutations
+    from domain import Plan, Session
 
 RESOURCES = {'exercises': s.exercises, 'plans': s.training_plans,
              'sessions': s.workout_sessions, 'schedule-overrides': s.schedule_overrides,

@@ -14,12 +14,20 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError, DataError, IntegrityError, TimeoutError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from backend.auth import AuthVerifier, identity
-from backend.config import Settings
-from backend.database import Database, lock_user_mutations, set_identity
-from backend.domain import Exercise, Page, Plan, Profile, ScheduleOverride, Session
-from backend import schema as db_schema
-from backend.store import RESOURCES, Store, etag
+if __package__:
+    from .auth import AuthVerifier, identity
+    from .config import Settings
+    from .database import Database, lock_user_mutations, set_identity
+    from .domain import Exercise, Page, Plan, Profile, ScheduleOverride, Session
+    from . import schema as db_schema
+    from .store import RESOURCES, Store, etag
+else:
+    from auth import AuthVerifier, identity
+    from config import Settings
+    from database import Database, lock_user_mutations, set_identity
+    from domain import Exercise, Page, Plan, Profile, ScheduleOverride, Session
+    import schema as db_schema
+    from store import RESOURCES, Store, etag
 
 User = Annotated[UUID, Depends(identity)]
 logger = logging.getLogger(__name__)

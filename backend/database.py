@@ -4,7 +4,10 @@ import sqlalchemy as sa
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from backend.config import Settings
+if __package__:
+    from .config import Settings
+else:
+    from config import Settings
 
 
 class Database:
