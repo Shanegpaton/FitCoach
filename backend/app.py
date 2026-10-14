@@ -43,21 +43,25 @@ class SyncBatch(BaseModel):
     mutations: list[SyncMutation] = Field(min_length=1, max_length=50)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+@asynccontextmanager
+async def api_lifespan(app: FastAPI):
+    database = app.state.database
+    settings = app.state.settings
+    try:
+        await database.verify_runtime_role()
+        async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+            app.state.auth = AuthVerifier(client, settings.supabase_url, settings.supabase_key)
+            yield
+    finally:
+        await database.close()
+
+
+def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     database = Database(settings)
-
-    @asynccontextmanager
-    async def lifespan(app):
-        try:
-            await database.verify_runtime_role()
-            async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
-                app.state.auth = AuthVerifier(client, settings.supabase_url, settings.supabase_key)
-                yield
-        finally:
-            await database.close()
-
-    app = FastAPI(title='FitCoachGPT training API', version='1.0.0', lifespan=lifespan)
+    app.title = 'FitCoachGPT training API'
+    app.version = '1.0.0'
+    app.state.settings = settings
     app.state.database = database
     app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
         allow_methods=['GET', 'POST', 'PUT', 'DELETE'], allow_headers=['Authorization', 'Content-Type', 'If-Match'],
@@ -229,3 +233,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         register(resource, model)
     register('catalog', Exercise, readonly=True)
     return app
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    return configure_app(FastAPI(lifespan=api_lifespan), settings)

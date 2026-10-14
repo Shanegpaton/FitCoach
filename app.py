@@ -1,5 +1,8 @@
 """Vercel entry point for the training API."""
 
-from backend.app import create_app
+from fastapi import FastAPI
 
-app = create_app()
+from backend.app import api_lifespan, configure_app
+
+app = FastAPI(lifespan=api_lifespan)
+configure_app(app)
