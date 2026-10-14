@@ -27,7 +27,7 @@ Provision the dedicated `fitcoach_api` login using `backend/provision-role.sql` 
 
 Set `FITCOACH_MIGRATION_DATABASE_URL` to privileged migration credentials. Set `FITCOACH_DATABASE_URL` to the dedicated runtime credentials. Both must use `postgresql+psycopg://` and TLS (`sslmode=require`, or `verify-full` with the appropriate CA). The API does not read the migration URL. Startup rejects owner/superuser/BYPASSRLS credentials, unsafe memberships, schema creation privileges, writable catalog access, or disabled RLS.
 
-For a persistent server, use Supabase's direct connection from the project's **Connect** panel. On an IPv4-only network, use its **session** pooler connection on port 5432, with the displayed pooler hostname and `fitcoach_api.PROJECT_REF` username. Do not substitute the transaction pooler URI. The SQLAlchemy pool defaults to five connections, no overflow, health checks, and a ten-second pool timeout; configure `FITCOACH_POOL_SIZE` and `FITCOACH_POOL_TIMEOUT` to fit your project limits. [Supabase connection guidance](https://supabase.com/docs/guides/database/connecting-to-postgres)
+For a persistent server, use Supabase's direct connection from the project's **Connect** panel. On an IPv4-only network, use its **session** pooler connection on port 5432, with the displayed pooler hostname and `fitcoach_api.PROJECT_REF` username. For Vercel Functions, use the **transaction** pooler on port 6543 with the restricted runtime role; the API disables Psycopg's server-side prepared statements on that port. The SQLAlchemy pool defaults to five connections on persistent servers and one per Vercel function instance, with no overflow, health checks, a five-minute connection recycle interval, and a ten-second pool timeout. Configure `FITCOACH_POOL_SIZE` and `FITCOACH_POOL_TIMEOUT` to fit your project limits. Keep the migration URL on a direct or session connection. [Supabase connection guidance](https://supabase.com/docs/guides/database/connecting-to-postgres)
 
 Apply migrations, then run the API:
 
@@ -39,6 +39,23 @@ env -u FITCOACH_MIGRATION_DATABASE_URL uvicorn backend.app:create_app --factory 
 Alembic is the sole migration system. It creates the private `fitcoach` schema, tables, constraints, indexes, catalog seed, metadata triggers, forced RLS policies and runtime grants. It never changes `auth` or Supabase's `public` application tables; its migration-version table is `public.alembic_version`. Run schema downgrades only against a disposable development database: `alembic -c backend/alembic.ini downgrade base` removes **all training API data**.
 
 `GET /health` is a public process-liveness endpoint. Interactive API documentation is at `/docs`. `FITCOACH_CORS_ORIGINS` is an explicit comma-separated list of allowed browser origins. CORS exposes `ETag`, permits `If-Match`, and allows authenticated sync POST requests; it defaults to no allowed origins. Set `VITE_FITCOACH_API_URL` in `frontend/.env.local` to this API origin.
+
+## Deploy the API on Vercel
+
+Create a **separate Vercel project** for the API from the same repository as the PWA. Set its Root Directory to the repository root (`.`) and use the FastAPI framework preset. The root `app.py` exports the API for Vercel; `requirements.txt` installs only the training API dependencies. The separate RAG dependencies are in `requirements-rag.txt`. The function configuration excludes frontend, RAG, test, migration, and local env files from the function bundle. No custom build command or output directory is needed.
+
+In the API project's Vercel environment settings, set:
+
+| Variable | Value |
+| --- | --- |
+| `FITCOACH_DATABASE_URL` | Restricted `fitcoach_api` runtime connection through Supabase's transaction pooler on port 6543, using `postgresql+psycopg://` and `sslmode=require`. |
+| `FITCOACH_SUPABASE_URL` | Your Supabase project HTTPS URL. |
+| `FITCOACH_SUPABASE_KEY` | Your Supabase publishable/anon key, used when checking bearer tokens with Supabase Auth. |
+| `FITCOACH_CORS_ORIGINS` | Exact HTTPS origin of the PWA, with no trailing slash. Use a comma-separated list only if more origins are intentionally allowed. |
+
+Provision the restricted runtime role and run `alembic -c backend/alembic.ini upgrade head` with `FITCOACH_MIGRATION_DATABASE_URL` from a trusted local or CI environment **before** deploying the function. Do not run migrations during a function startup or give Vercel migration credentials. The API checks its runtime role and schema on each cold start and fails closed if they are unsafe or missing.
+
+Set the frontend Vercel project's `VITE_FITCOACH_API_URL` to the API deployment's HTTPS origin, for example `https://api.example.com`, with no `/v1` suffix. Redeploy the frontend after changing this build-time variable. Preview frontend origins need to be added explicitly to `FITCOACH_CORS_ORIGINS` if they should sync. Choose a Vercel Function region close to the Supabase database in the API project settings. Then request `/health` on the API deployment and confirm the frontend's sync status online. The API URL is public; the runtime database URL must remain only in the API project's environment settings.
 
 ## API
 

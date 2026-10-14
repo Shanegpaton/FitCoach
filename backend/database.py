@@ -1,6 +1,7 @@
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.config import Settings
@@ -8,9 +9,13 @@ from backend.config import Settings
 
 class Database:
     def __init__(self, settings: Settings):
+        connect_args = {'connect_timeout': 10}
+        if make_url(settings.database_url).port == 6543:
+            # Supabase's transaction pooler cannot use server-side prepared statements.
+            connect_args['prepare_threshold'] = None
         self.engine = create_async_engine(settings.database_url,
             pool_size=settings.pool_size, max_overflow=0, pool_timeout=settings.pool_timeout,
-            pool_pre_ping=True, connect_args={'connect_timeout': 10})
+            pool_pre_ping=True, pool_recycle=300, connect_args=connect_args)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
 
     async def verify_runtime_role(self):
