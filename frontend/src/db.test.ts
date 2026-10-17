@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TrainingDB, applyProposal, createSession, exportBackup, finishSession, importBackup, importLegacyData, initialize, savePlan } from './db';
+import { TrainingDB, applyProposal, createSession, exportBackup, finishSession, hasLegacyData, importBackup, importLegacyData, initialize, savePlan } from './db';
 import { catalog, starterPlan } from './catalog';
 import { backupSchema, defaultProfile, uid, type Proposal } from './domain';
 import { startSession } from './training';
@@ -10,6 +10,11 @@ beforeEach(async () => { db = new TrainingDB(`test-${uid()}`); await initialize(
 afterEach(async () => { vi.restoreAllMocks(); await db.delete(); });
 
 describe('durable local data', () => {
+  it('does not offer import for an empty legacy database', async () => {
+    const empty = new TrainingDB(`empty-legacy-${uid()}`);
+    expect(await hasLegacyData(empty)).toBe(false);
+    await empty.delete();
+  });
   it('keeps account databases isolated and copies anonymous data without deleting the source', async () => {
     const legacy = new TrainingDB(`legacy-${uid()}`); const accountA = new TrainingDB(`account-a-${uid()}`, 'user-a'); const accountB = new TrainingDB(`account-b-${uid()}`, 'user-b');
     await initialize(legacy); await legacy.profile.put({ ...(await legacy.profile.get('profile'))!, goals: 'Keep this plan' });

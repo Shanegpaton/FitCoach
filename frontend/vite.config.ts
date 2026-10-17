@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { readFileSync } from 'node:fs';
@@ -7,7 +7,24 @@ const https = process.env.FITCOACH_TLS_CERT && process.env.FITCOACH_TLS_KEY
   ? { cert: readFileSync(process.env.FITCOACH_TLS_CERT), key: readFileSync(process.env.FITCOACH_TLS_KEY) }
   : undefined;
 
-export default defineConfig({
+export default defineConfig(({ command, mode }) => {
+  if (command === 'build' && mode === 'production') {
+    const apiUrl = loadEnv(mode, process.cwd(), 'VITE_FITCOACH_API_URL').VITE_FITCOACH_API_URL;
+    let parsed: URL;
+    try {
+      parsed = new URL(apiUrl);
+    } catch {
+      throw new Error('Set VITE_FITCOACH_API_URL to the deployed API HTTPS origin before building the PWA.');
+    }
+    const localHost = parsed.hostname === 'localhost' || parsed.hostname.endsWith('.localhost') ||
+      parsed.hostname.startsWith('127.') || parsed.hostname === '[::1]' || parsed.hostname === '0.0.0.0';
+    if (parsed.protocol !== 'https:' || localHost || !parsed.hostname || parsed.pathname !== '/' ||
+      parsed.search || parsed.hash || parsed.username || parsed.password) {
+      throw new Error('VITE_FITCOACH_API_URL must be the deployed API HTTPS origin, without a path or credentials.');
+    }
+  }
+
+  return {
   plugins: [react(), VitePWA({
     registerType: 'prompt',
     includeAssets: ['icon.svg', 'icons/*.png'],
@@ -28,4 +45,5 @@ export default defineConfig({
   build: { rollupOptions: { output: { manualChunks(id) {
     if (id.includes('node_modules/dexie/') || id.includes('node_modules/dexie-react-hooks/')) return 'storage';
   } } } },
+  };
 });

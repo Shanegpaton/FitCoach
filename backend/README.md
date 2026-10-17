@@ -38,7 +38,7 @@ env -u FITCOACH_MIGRATION_DATABASE_URL uvicorn backend.app:create_app --factory 
 
 Alembic is the sole migration system. It creates the private `fitcoach` schema, tables, constraints, indexes, catalog seed, metadata triggers, forced RLS policies and runtime grants. It never changes `auth` or Supabase's `public` application tables; its migration-version table is `public.alembic_version`. Run schema downgrades only against a disposable development database: `alembic -c backend/alembic.ini downgrade base` removes **all training API data**.
 
-`GET /health` is a public process-liveness endpoint. Interactive API documentation is at `/docs`. `FITCOACH_CORS_ORIGINS` is an explicit comma-separated list of allowed browser origins. CORS exposes `ETag`, permits `If-Match`, and allows authenticated sync POST requests; it defaults to no allowed origins. Set `VITE_FITCOACH_API_URL` in `frontend/.env.local` to this API origin.
+`GET /health` is a public process-liveness endpoint. Interactive API documentation is at `/docs`. `FITCOACH_CORS_ORIGINS` is an explicit comma-separated list of allowed browser origins. CORS exposes `ETag`, permits `If-Match`, and allows authenticated sync POST requests; it defaults to no allowed origins. Set `VITE_FITCOACH_API_URL` in `frontend/.env.development.local` to this API origin for local development.
 
 ## Deploy the API on Vercel
 

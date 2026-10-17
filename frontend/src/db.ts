@@ -109,8 +109,8 @@ export async function hasLegacyData(database = legacyDb) {
   const profile = await database.profile.get('profile');
   const exercises = await database.exercises.toArray();
   const catalogById = new Map(catalog.map(exercise => [exercise.id, exercise]));
-  const hasCustomizedExercise = exercises.length !== catalog.length || exercises.some(exercise =>
-    JSON.stringify(catalogById.get(exercise.id)) !== JSON.stringify(exercise));
+  const hasCustomizedExercise = exercises.length > 0 && (exercises.length !== catalog.length || exercises.some(exercise =>
+    JSON.stringify(catalogById.get(exercise.id)) !== JSON.stringify(exercise)));
   return Boolean((profile && JSON.stringify(profile) !== JSON.stringify(defaultProfile)) || hasCustomizedExercise ||
     await database.plans.count() || await database.sessions.count() || await database.overrides.count() ||
     await database.messages.count() || await database.proposals.count());

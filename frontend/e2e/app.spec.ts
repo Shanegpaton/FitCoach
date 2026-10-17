@@ -149,3 +149,37 @@ test('backup export/import round trip and invalid import preserves plans', async
   await page.getByRole('link', { name: 'Plan', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'My strength plan', exact: true })).toBeVisible();
 });
+
+test('legacy import closes with feedback and is offered only once', async ({ page }) => {
+  await openApp(page);
+  const prompt = page.getByRole('dialog', { name: 'Import this device’s training data?' });
+  await expect(prompt).toHaveCount(0);
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('fitcoach-v1');
+      request.onupgradeneeded = () => {
+        for (const name of ['profile', 'exercises', 'plans', 'sessions', 'overrides', 'messages', 'proposals'])
+          request.result.createObjectStore(name, { keyPath: 'id' });
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction('profile', 'readwrite');
+        transaction.objectStore('profile').put({ id: 'profile', goals: 'Legacy strength goal',
+          experience: 'Beginner', equipment: [], trainingDays: [], sessionMinutes: 45, unit: 'lb', onboardingDone: true });
+        transaction.oncomplete = () => { database.close(); resolve(); };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+    localStorage.removeItem('fitcoach:e2e-user:legacy-reviewed');
+  });
+  await page.reload();
+  await expect(prompt).toBeVisible();
+  await prompt.getByRole('button', { name: 'Import data' }).click();
+  await expect(prompt).toHaveCount(0);
+  await expect(page.locator('.toast[role="status"]')).toContainText('Training data imported on this device');
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.getByLabel('What are you working toward?')).toHaveValue('Legacy strength goal');
+  await page.reload();
+  await expect(prompt).toHaveCount(0);
+});

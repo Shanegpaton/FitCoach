@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link, Navigate, NavLink, Route, Routes, useLocation } from 'react-router';
 import { Activity, ArrowUpRight, Check, Dumbbell, History as HistoryIcon, LayoutGrid, LogOut, Settings as SettingsIcon, Sparkles, WifiOff, X } from 'lucide-react';
@@ -25,6 +25,9 @@ export function App() {
   const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null);
   const [legacyAvailable, setLegacyAvailable] = useState(false);
   const [migrationSeen, setMigrationSeen] = useState(false);
+  const [importingLegacy, setImportingLegacy] = useState(false);
+  const [legacyImportError, setLegacyImportError] = useState('');
+  const legacyImportRunning = useRef(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const location = useLocation();
   const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW();
@@ -76,6 +79,33 @@ export function App() {
     try { await action(); if (success) notify(success); return true; }
     catch (error) { notify(error instanceof ZodError ? error.issues[0]?.message ?? 'Check the entered values.' : error instanceof Error ? error.message : 'Could not save. Your changes have not been saved.', true); return false; }
   };
+  const finishLegacyReview = () => {
+    if (legacyImportRunning.current || !auth.userId) return;
+    localStorage.setItem(`fitcoach:${auth.userId}:legacy-reviewed`, 'yes');
+    setLegacyAvailable(false);
+    setMigrationSeen(true);
+    setLegacyImportError('');
+  };
+  const importLegacy = async () => {
+    if (legacyImportRunning.current || !auth.userId) return;
+    legacyImportRunning.current = true;
+    setImportingLegacy(true);
+    setLegacyImportError('');
+    const userId = auth.userId;
+    try {
+      await importLegacyData();
+      localStorage.setItem(`fitcoach:${userId}:legacy-reviewed`, 'yes');
+      setLegacyAvailable(false);
+      setMigrationSeen(true);
+      notify('Training data imported on this device. Account sync will continue in the background.');
+    } catch (error) {
+      setLegacyImportError(error instanceof ZodError ? error.issues[0]?.message ?? 'Check the saved data.'
+        : error instanceof Error ? error.message : 'Could not import data. Your existing data is safe.');
+    } finally {
+      legacyImportRunning.current = false;
+      setImportingLegacy(false);
+    }
+  };
   if (auth.loading) return <div className="startup"><span className="brand-mark">f.</span><p>Checking your training space…</p></div>;
   if (!auth.userId) return <div className="auth-screen"><span className="brand-mark large">f.</span><span className="eyebrow">FITCOACH</span><h1>Your training,<br /><span className="text-accent">on your terms.</span></h1><p>Sign in with Google to open your private training space. Once signed in on this device, your workouts stay available offline.</p>{!auth.configured && <div className="auth-config" role="status"><strong>Supabase setup needed</strong><span>Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in frontend/.env.local, then configure Google OAuth in Supabase.</span></div>}<button className="button primary google-signin" disabled={!auth.configured || !online} onClick={() => void auth.signIn()}><GoogleMark />Continue with Google</button>{!online && <p className="field-hint">Connect to the internet to sign in for the first time.</p>}{auth.error && <p className="auth-error" role="alert">{auth.error}</p>}</div>;
   if (fatal) return <div className="startup"><h1>Storage is unavailable</h1><p>FitCoach needs browser storage to save workouts. Check storage permissions and available space, then retry.</p><details><summary>Details</summary>{fatal}</details><button className="button primary" onClick={() => window.location.reload()}>Retry</button></div>;
@@ -110,7 +140,7 @@ export function App() {
       </nav>
       {toast && <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <X size={18} /> : <Check size={18} />}<span>{toast.message}</span><button aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={16} /></button></div>}
       {!data.profile.onboardingDone && <Onboarding />}
-      {legacyAvailable && !migrationSeen && <Modal title="Import this device’s training data?" onClose={() => { localStorage.setItem(`fitcoach:${auth.userId}:legacy-reviewed`, 'yes'); setLegacyAvailable(false); setMigrationSeen(true); }}><p>FitCoach found data from before sign-in was added. Import it into this Google account to keep using your existing plans, profile, and workout history.</p><p className="field-hint">The original local data is kept. Importing replaces data in this account if it already has any.</p><div className="action-row"><button className="button secondary" onClick={() => { localStorage.setItem(`fitcoach:${auth.userId}:legacy-reviewed`, 'yes'); setLegacyAvailable(false); setMigrationSeen(true); }}>Keep accounts separate</button><button className="button primary" onClick={async () => { if (await run(() => importLegacyData(), 'Existing training data imported')) { localStorage.setItem(`fitcoach:${auth.userId}:legacy-reviewed`, 'yes'); setLegacyAvailable(false); setMigrationSeen(true); } }}>Import data</button></div></Modal>}
+      {legacyAvailable && !migrationSeen && <Modal title="Import this device’s training data?" onClose={finishLegacyReview}><p>FitCoach found data from before sign-in was added. Import it into this Google account to keep using your existing plans, profile, and workout history.</p><p className="field-hint">The original local data is kept. Importing replaces data in this account if it already has any.</p>{legacyImportError && <p className="auth-error" role="alert">Import failed: {legacyImportError}</p>}<div className="action-row"><button className="button secondary" disabled={importingLegacy} onClick={finishLegacyReview}>Keep accounts separate</button><button className="button primary" disabled={importingLegacy} onClick={() => void importLegacy()}>{importingLegacy ? 'Importing…' : 'Import data'}</button></div></Modal>}
     </div>
   </AppContext.Provider>;
 }

@@ -14,24 +14,24 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173`. For production-build and offline testing:
+Open `http://localhost:5173`. For production-build and offline testing, set `VITE_FITCOACH_API_URL` to the deployed API's HTTPS origin before building:
 
 ```bash
-npm run build
+VITE_FITCOACH_API_URL=https://YOUR_API_HOST npm run build
 npm run preview
 ```
 
 ### Supabase Google sign-in
 
-Create `frontend/.env.local` from `frontend/.env.example` and set your Supabase project URL and publishable (anon) key. These are public frontend values; never put a Supabase service-role key in the PWA.
+Set your Supabase project URL and publishable (anon) key in `frontend/.env.local`, and put the local API URL from `frontend/.env.example` in `frontend/.env.development.local`. These are public frontend values; never put a Supabase service-role key in the PWA. Vite loads a plain `.env` during production builds too, so keep localhost settings in `.env.development.local`.
 
 In Supabase, enable Google under **Authentication → Providers** and add the Google OAuth client ID and secret. In Google Cloud, set the authorized redirect URI to the callback URL shown by Supabase for your project (`https://<project-ref>.supabase.co/auth/v1/callback`). In Supabase **Authentication → URL Configuration**, set **Site URL** to the production PWA origin (for example, `https://your-app.vercel.app`) and add the exact production callback (`https://your-app.vercel.app/auth/callback`) to **Redirect URLs**. Keep `http://localhost:5173/auth/callback` there as an additional redirect only if you still use local development. The PWA supplies its current origin in `redirectTo`, so preview deployments also need their callback URLs allowed if Google sign-in should work on them.
 
-The PWA uses the PKCE flow and persists the Supabase session in browser storage. A returning account can open its local plans and log workouts offline even when its token cannot be refreshed. Signing out clears the active auth session but keeps that account’s local database gated from other accounts. Existing anonymous `fitcoach-v1` data is offered for explicit import into an account; the source database remains intact.
+The PWA uses the PKCE flow and persists the Supabase session in browser storage. A returning account can open its local plans and log workouts offline even when its token cannot be refreshed. Signing out clears the active auth session but keeps that account’s local database gated from other accounts. Existing anonymous `fitcoach-v1` data is offered for explicit import into an account; the source database remains intact. The import dialog shows progress and errors, closes after a successful local import, and leaves account synchronization running in the background.
 
 Local changes are recorded in a per-account IndexedDB outbox and uploaded to the authenticated FastAPI training API when connectivity is available. The PWA downloads incremental account changes, uses server ETags to surface conflicts, and keeps recovery copies before deletes or conflict resolution. Workouts continue saving locally while offline. Existing anonymous data still requires explicit import; cloud-only data is preserved during first sync and backup import.
 
-Set `VITE_FITCOACH_API_URL` in `frontend/.env.local` to the training API origin (for local development, `http://localhost:8000`). In a Vercel frontend project, set it to the deployed API's HTTPS origin. Supabase access tokens authenticate sync requests. The API must allow the PWA origin in `FITCOACH_CORS_ORIGINS`; see [the API guide](backend/README.md).
+Set `VITE_FITCOACH_API_URL` in `frontend/.env.development.local` to the local training API origin (`http://localhost:8000`). In the Vercel frontend project's Production and Preview environment settings, set it to the deployed API's HTTPS origin (without `/v1`), then redeploy. Production builds now fail when this URL is missing, uses HTTP, or includes a path. Supabase access tokens authenticate sync requests. The API must allow the PWA origin in `FITCOACH_CORS_ORIGINS`; see [the API guide](backend/README.md). After deployment, check the browser's network requests for the HTTPS API origin and confirm the sync status. Existing pending changes remain in the local outbox and retry after the corrected build loads.
 
 Open `http://localhost:4173` once online, then test offline. Service-worker caching is enabled in the production build, not the development server. Keep using the same origin: development, preview, and different hostnames have separate browser databases.
 
@@ -64,7 +64,7 @@ mkcert -install
 mkdir -p .certs
 FITCOACH_LAN_IP=192.168.1.100
 mkcert -cert-file .certs/local.pem -key-file .certs/local-key.pem localhost 127.0.0.1 "$FITCOACH_LAN_IP"
-npm run build
+VITE_FITCOACH_API_URL=https://YOUR_API_HOST npm run build
 FITCOACH_TLS_CERT=.certs/local.pem FITCOACH_TLS_KEY=.certs/local-key.pem npm run preview
 ```
 
@@ -79,9 +79,9 @@ Rest timers recalculate correctly after returning to the app. Sound and vibratio
 ```bash
 cd frontend
 npm test
-npm run build
+VITE_FITCOACH_API_URL=https://YOUR_API_HOST npm run build
 npx playwright install webkit
-npm run test:e2e
+VITE_FITCOACH_API_URL=https://YOUR_API_HOST npm run test:e2e
 ```
 
 Browser tests use installed Google Chrome for desktop and Android-sized emulation, plus Playwright WebKit for iPhone-sized emulation. They cover onboarding, offline logging and reload recovery, proposals, supersets, timers, custom exercises, real history, and backups. Physical iOS/Android installation and device alert behavior should also be checked before release.
