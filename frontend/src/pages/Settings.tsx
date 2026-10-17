@@ -4,9 +4,9 @@ import { ArrowLeft, ArrowRight, Check, Download, HardDrive, RefreshCw, ShieldChe
 import { Link } from 'react-router';
 import { backupSchema, type Backup, type Profile } from '../domain';
 import { db, exportBackup, importBackup, putLocalChange } from '../db';
-import { resolveConflict } from '../sync';
 import { useApp } from '../state';
 import { Days, Modal, SectionTitle } from '../ui';
+import { ConflictReview } from './ConflictReview';
 
 function TrainingFields({ value, onChange }: { value: Profile; onChange: (profile: Profile) => void }) {
   return <><label>What are you working toward?<textarea value={value.goals} maxLength={2000} rows={3} placeholder="Build muscle, get stronger, feel more consistent…" onChange={e => onChange({ ...value, goals: e.target.value })} /></label>
@@ -30,6 +30,7 @@ export function Settings() {
   const [draft, setDraft] = useState(profile);
   const [backup, setBackup] = useState<Backup | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reviewId, setReviewId] = useState<string | null>(null);
   const syncItems = useLiveQuery(async () => db.ownerId ? Promise.all([
     db.outbox.where('userId').equals(db.ownerId).toArray(),
     db.sync.where('userId').equals(db.ownerId).toArray(),
@@ -37,6 +38,10 @@ export function Settings() {
   const pendingSync = syncItems?.[0] ?? [];
   const syncRecords = syncItems?.[1] ?? [];
   const conflicts = syncRecords.filter(item => item.kind === 'conflict');
+  const failed = pendingSync.filter(item => item.status === 'failed');
+  const reviewed = conflicts.find(item => item.id === reviewId);
+  const resolutions = syncRecords.filter(item => item.kind === 'root' && item.resolvedAt)
+    .sort((a, b) => (b.resolvedAt ?? '').localeCompare(a.resolvedAt ?? '')).slice(0, 5);
   const recoveries = syncRecords.filter(item => item.kind === 'recovery');
   const syncState = syncRecords.find(item => item.kind === 'state');
   const save = (e: FormEvent) => { e.preventDefault(); void run(() => putLocalChange('profile', { ...draft, onboardingDone: true }, db.profile), 'Profile saved'); };
@@ -51,10 +56,16 @@ export function Settings() {
   return <div className="page settings-page"><Link to="/" className="text-button"><ArrowLeft size={17} />Back to Today</Link><div className="page-heading compact-heading"><span className="eyebrow">MAKE IT YOURS</span><h1>Your space.</h1><p>A few details. A better starting point.</p></div>
     <form className="settings-card" onSubmit={save}><SectionTitle title="Training profile" /><TrainingFields value={draft} onChange={setDraft} /><button className="button primary" type="submit">Save profile<Check size={18} /></button></form>
     <section className="settings-card"><SectionTitle title="Synchronization"><HardDrive size={20} /></SectionTitle><div className="privacy-note"><ShieldCheck size={20} /><p>Every change saves on this device first. When you’re online and signed in, your plans and workouts sync to your account. Export a backup before changing phones or clearing browser data.</p></div>
-      <p role="status">{pendingSync.length ? `${pendingSync.length} change${pendingSync.length === 1 ? '' : 's'} pending or awaiting resolution.` : 'No local changes are waiting to upload.'}</p>
+      <p role="status">{failed.length ? `${failed.length} change${failed.length === 1 ? '' : 's'} failed to upload.` : conflicts.length ? `${conflicts.length} conflict${conflicts.length === 1 ? '' : 's'} need your choice.` : pendingSync.length ? `${pendingSync.length} change${pendingSync.length === 1 ? '' : 's'} pending upload.` : 'All changes are synchronized.'}</p>
       <p className="field-hint">{syncState?.updatedAt ? `Last sync activity: ${new Date(syncState.updatedAt).toLocaleString()}` : 'This account has not synchronized on this device yet.'}</p>
       <button className="button secondary" onClick={() => window.dispatchEvent(new Event('fitcoach:sync-now'))}><RefreshCw size={16} />Sync now</button>
-      {conflicts.length > 0 && <div className="sync-conflicts"><SectionTitle title="Choose how to resolve" /><p className="field-hint">Both copies are preserved until you choose. Workout set data is never merged or discarded automatically.</p>{conflicts.map(conflict => <article className="sync-conflict" key={conflict.id}><strong>{conflict.entity} · {conflict.entityId}</strong><p>{conflict.reason}</p><div className="action-row"><button className="button secondary" onClick={() => run(() => resolveConflict(db, conflict.id, 'keep-both'), conflict.entity === 'profile' ? 'Your profile changes are queued.' : 'Both copies have been preserved.')}>{conflict.entity === 'profile' ? 'Keep my changes' : 'Keep both copies'}</button><button className="button secondary" onClick={() => run(() => resolveConflict(db, conflict.id, 'use-cloud'), 'Cloud copy restored')}>Use cloud copy</button></div></article>)}</div>}
+      {failed.length > 0 && <div className="sync-conflicts"><SectionTitle title="Failed uploads" />{failed.map(item => <article className="sync-conflict" key={item.id}><strong>{item.entity} · {item.entityId}</strong><p>{item.error ?? 'The server rejected this change.'}</p><button className="button secondary" onClick={() => run(async () => { await db.outbox.update(item.id, { status: 'pending', error: undefined }); window.dispatchEvent(new Event('fitcoach:sync-now')); }, 'Upload queued to retry')}>Retry upload</button></article>)}</div>}
+      {conflicts.length > 0 && <div className="sync-conflicts"><SectionTitle title="Choose how to resolve" /><p className="field-hint">Both versions remain available until you choose. Review the changes before replacing either copy.</p>{conflicts.map(conflict => <article className="sync-conflict" key={conflict.id}><strong>{conflict.entity} · {conflict.entityId}</strong><p>{conflict.reason}</p><button className="button secondary" onClick={() => setReviewId(conflict.id)}>Review versions</button></article>)}</div>}
+      {resolutions.length > 0 && <div className="sync-resolutions"><SectionTitle title="Recent resolutions" />{resolutions.map(item => {
+        const queued = pendingSync.find(change => change.entity === item.entity && change.entityId === item.entityId);
+        const conflicted = conflicts.some(conflict => conflict.entity === item.entity && conflict.entityId === item.entityId);
+        return <p key={item.id}>{item.entity} · {item.entityId}: {conflicted ? 'New conflict needs review' : queued?.status === 'failed' ? 'Upload failed' : queued ? 'Pending upload' : 'Synchronized'}</p>;
+      })}</div>}
       {recoveries.length > 0 && <details className="recovery-list"><summary>{recoveries.length} recovery cop{recoveries.length === 1 ? 'y' : 'ies'} saved</summary>{recoveries.map(item => <div className="recovery-row" key={item.id}><span>{item.entity} · {item.entityId} · {item.reason}</span><button className="text-button" onClick={() => {
         const blob = new Blob([JSON.stringify({ entity: item.entity, entityId: item.entityId, reason: item.reason, payload: item.payload }, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `fitcoach-recovery-${item.entityId}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -75,5 +86,9 @@ export function Settings() {
     {backup && <Modal title="Replace local data?" onClose={() => setBackup(null)}><p>This backup contains {backup.plans.length} plans and {backup.sessions.length} sessions. Importing replaces the data currently stored on this device, including {sessions.length} sessions.</p><p className="field-hint">Export your current data first if you want to keep it.</p><div className="action-row"><button className="button secondary" onClick={exportFile}>Export current data</button><button className="button primary" disabled={busy} onClick={async () => {
       setBusy(true); if (await run(() => importBackup(backup), 'Backup imported')) { setDraft(backup.profile); setBackup(null); } setBusy(false);
     }}>{busy ? 'Importing…' : 'Replace & import'}</button></div></Modal>}
+    {reviewed && <ConflictReview key={reviewed.id} conflict={reviewed} onClose={() => setReviewId(null)} onResolved={message => {
+      if (reviewed.entity === 'profile') void db.profile.get('profile').then(current => { if (current) setDraft(current); });
+      setReviewId(null); notify(message);
+    }} />}
   </div>;
 }

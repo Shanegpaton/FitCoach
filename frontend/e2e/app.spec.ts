@@ -183,3 +183,66 @@ test('legacy import closes with feedback and is offered only once', async ({ pag
   await page.reload();
   await expect(prompt).toHaveCount(0);
 });
+
+test('conflict review shows both versions and queues a manual result', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('fitcoach-user-e2e-user');
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction(['profile', 'sync'], 'readwrite');
+        const profile = transaction.objectStore('profile');
+        const read = profile.get('profile');
+        read.onsuccess = () => {
+          const local = { ...read.result, goals: 'Device goal' };
+          const cloud = { ...read.result, goals: 'Cloud goal' };
+          profile.put(local);
+          transaction.objectStore('sync').put({ id: 'conflict:e2e-user:profile:profile',
+            userId: 'e2e-user', kind: 'conflict', entity: 'profile', entityId: 'profile',
+            payload: local, remotePayload: cloud, remoteDeleted: false, remoteEtag: '"3"',
+            reason: 'This record changed on another device.' });
+        };
+        transaction.oncomplete = () => { database.close(); resolve(); };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+  });
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Review versions' }).click();
+  const review = page.getByRole('dialog', { name: 'Resolve sync conflict' });
+  await expect(review.locator('summary', { hasText: 'This device' })).toBeVisible();
+  await expect(review.locator('summary', { hasText: 'Cloud' })).toBeVisible();
+  await review.getByRole('button', { name: 'Edit and merge' }).click();
+  await review.getByRole('button', { name: 'Use cloud value' }).first().click();
+  await review.getByRole('textbox', { name: 'Goals', exact: true }).fill('Combined goal');
+  await review.getByRole('button', { name: 'Save and upload final version' }).click();
+  await expect(review).toHaveCount(0);
+  await expect(page.locator('.sync-resolutions')).toContainText('Pending upload');
+  await expect(page.getByLabel('What are you working toward?')).toHaveValue('Combined goal');
+});
+
+test('failed uploads stay visible instead of showing synchronized', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('fitcoach-user-e2e-user');
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction('outbox', 'readwrite');
+        transaction.objectStore('outbox').put({ id: crypto.randomUUID(), userId: 'e2e-user',
+          createdAt: new Date().toISOString(), entity: 'profile', entityId: 'profile',
+          operation: 'upsert', payload: null, expectedEtag: '"3"', localRevision: 1,
+          status: 'failed', error: 'Invalid profile data', sentAt: new Date().toISOString() });
+        transaction.oncomplete = () => { database.close(); resolve(); };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+  });
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Failed uploads' })).toBeVisible();
+  await expect(page.getByText('Invalid profile data')).toBeVisible();
+  await expect(page.getByText('All changes are synchronized.')).toHaveCount(0);
+});

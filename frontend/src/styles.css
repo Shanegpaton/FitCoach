@@ -130,6 +130,16 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 .sync-banner.sync-alert { background: #39251f; color: #f2c0a8; }
 .sync-conflicts { margin: 18px 0; }.sync-conflict { border: 1px solid #4a503d; border-radius: 12px; padding: 15px; margin: 12px 0; background: #20251d; }
 .sync-conflict p { color: #aeb9a0; font-size: 12px; margin: 8px 0 13px; }.recovery-list { margin: 20px 0; color: #b8c1ad; font-size: 12px; }
+.sync-resolutions { margin: 18px 0; }.sync-resolutions p { color: #b8c1ad; font-size: 12px; overflow-wrap: anywhere; }
+.conflict-versions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.conflict-versions details, .conflict-field, .conflict-block { border: 1px solid #4a503d; border-radius: 12px; padding: 12px; background: #20251d; }
+.conflict-versions summary, .conflict-advanced summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.conflict-versions pre { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; color: #b8c1ad; }
+.conflict-edit { margin-top: 20px; display: grid; gap: 14px; }.conflict-edit h3 { margin: 0; }.conflict-field { display: grid; gap: 5px; overflow-wrap: anywhere; }
+.conflict-field span { color: #b8c1ad; font-size: 12px; }.conflict-field .action-row { margin: 0; }.conflict-block { display: grid; gap: 10px; }
+.conflict-check { display: flex; align-items: center; gap: 8px; }.conflict-check input { width: auto; min-height: auto; }
+.conflict-advanced textarea { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px; }
+@media (max-width: 600px) { .conflict-versions { grid-template-columns: 1fr; } }
 .recovery-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid #384034; padding: 10px 0; }
 .recovery-row span { overflow-wrap: anywhere; }.other-active { display: grid; gap: 9px; margin-top: 18px; border-top: 1px solid #3a4430; padding-top: 15px; }
 .other-active a { min-height: 42px; display: flex; align-items: center; justify-content: space-between; color: #cbd4c0; font-size: 12px; }

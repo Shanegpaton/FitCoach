@@ -1,7 +1,7 @@
 import type { SyncEntity } from './db';
 import { db, enqueueChange, saveRecovery, syncRootId, syncStateId, type PendingChange, type TrainingDB } from './db';
 import { catalog } from './catalog';
-import { defaultProfile, type Exercise } from './domain';
+import { defaultProfile, exerciseSchema, overrideSchema, planSchema, profileSchema, sessionSchema, type Exercise } from './domain';
 
 const apiUrl = (import.meta.env.VITE_FITCOACH_API_URL as string | undefined)?.replace(/\/$/, '');
 const priority: Record<SyncEntity, number> = {
@@ -12,12 +12,14 @@ export interface SyncStatus {
   state: 'offline' | 'idle' | 'syncing' | 'error';
   pending: number;
   conflicts: number;
+  failed: number;
   lastSuccessAt: string | null;
   message: string;
 }
 
 export type TokenProvider = (forceRefresh?: boolean, expectedUserId?: string) => Promise<string | null>;
 type Change = { resource: SyncEntity; id: string; sequence: number; version: number; etag: string; deleted: boolean; document: unknown | null };
+export type ConflictSnapshot = { local: unknown | null; remoteEtag: string | null; remotePayload: unknown | null; remoteDeleted: boolean };
 
 function etagVersion(etag: string | null | undefined) {
   const version = Number(etag?.replaceAll('"', ''));
@@ -99,6 +101,8 @@ async function getNextMutations(database: TrainingDB, userId: string, limit = 50
   const changes = await database.outbox.where('userId').equals(userId).toArray();
   const blocked = new Set(changes.filter(item => item.status === 'conflict' || item.status === 'awaiting-remote')
     .map(item => `${item.entity}:${item.entityId}`));
+  const conflicts = await database.sync.where('userId').equals(userId).filter(item => item.kind === 'conflict').toArray();
+  for (const item of conflicts) if (item.entity && item.entityId) blocked.add(`${item.entity}:${item.entityId}`);
   const earliest = changes.filter(item => item.status === 'pending' && !blocked.has(`${item.entity}:${item.entityId}`)).sort((a, b) =>
     priority[a.entity] - priority[b.entity] || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
   const selected: PendingChange[] = [];
@@ -112,7 +116,7 @@ async function getNextMutations(database: TrainingDB, userId: string, limit = 50
   return selected;
 }
 
-async function upload(database: TrainingDB, userId: string, tokenProvider: TokenProvider) {
+export async function upload(database: TrainingDB, userId: string, tokenProvider: TokenProvider) {
   const changes = await getNextMutations(database, userId);
   if (!changes.length) return { uploaded: 0, awaiting: 0 };
   // Freeze each request before the network call. A retry after a crash reuses its exact key and body.
@@ -148,35 +152,41 @@ async function upload(database: TrainingDB, userId: string, tokenProvider: Token
     if (!mutation) continue;
     if (result.status >= 200 && result.status < 300) {
       await database.transaction('rw', [database.outbox, database.sync], async () => {
+        if (!await database.outbox.get(mutation.id)) return;
         const rootId = syncRootId(userId, result.resource, result.id);
         const previous = await database.sync.get(rootId);
         // An idempotent retry can return its original receipt after another tab has
         // already recorded a newer ETag. Never move the local base version backward.
         const etag = (previous?.version ?? etagVersion(previous?.etag)) > etagVersion(result.etag)
           ? previous?.etag ?? null : result.etag;
-        await database.sync.put({ id: syncRootId(userId, result.resource, result.id), userId, kind: 'root',
+        await database.sync.put({ ...previous, id: syncRootId(userId, result.resource, result.id), userId, kind: 'root',
           entity: result.resource, entityId: result.id, etag, version: etagVersion(etag),
           remoteDeleted: mutation.operation === 'delete',
           updatedAt: new Date().toISOString() });
         await database.outbox.delete(mutation.id);
         const later = await database.outbox.where('[userId+entity+entityId]')
           .equals([userId, result.resource, result.id]).toArray();
-        for (const queued of later) if (!queued.sentAt && queued.status === 'pending')
-          await database.outbox.update(queued.id, { expectedEtag: etag });
+        for (const queued of later) {
+          if (queued.status === 'failed' && queued.createdAt <= mutation.createdAt) {
+            if (queued.payload) await saveRecovery(database, queued.entity, queued.entityId, queued.payload, 'failed upload superseded by newer change');
+            await database.outbox.delete(queued.id);
+          } else if (!queued.sentAt && queued.status === 'pending')
+            await database.outbox.update(queued.id, { expectedEtag: etag });
+        }
       });
       uploaded++;
     } else if ([404, 409, 412, 428].includes(result.status)) {
       await database.outbox.update(mutation.id, { status: 'awaiting-remote' });
       awaiting++;
     } else {
-      await database.outbox.update(mutation.id, { status: 'failed' as PendingChange['status'] });
+      await database.outbox.update(mutation.id, { status: 'failed' as PendingChange['status'], error: result.error ?? `Sync mutation rejected (${result.status})` });
       throw new Error(result.error || `Sync mutation rejected (${result.status})`);
     }
   }
   return { uploaded, awaiting };
 }
 
-async function applyChanges(database: TrainingDB, userId: string, changes: Change[], nextCursor: number) {
+export async function applyChanges(database: TrainingDB, userId: string, changes: Change[], nextCursor: number) {
   await database.transaction('rw', [database.profile, database.exercises, database.plans,
     database.sessions, database.overrides, database.outbox, database.sync], async () => {
     for (const change of changes) {
@@ -191,6 +201,8 @@ async function applyChanges(database: TrainingDB, userId: string, changes: Chang
       const pending = await database.outbox.where('[userId+entity+entityId]')
         .equals([userId, change.resource, change.id]).toArray();
       pending.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+      const conflictId = `conflict:${userId}:${change.resource}:${change.id}`;
+      const unresolved = await database.sync.get(conflictId);
       let localSnapshot = local;
       if (!localSnapshot && pending.some(item => item.operation === 'delete')) {
         const priorCopies = (await database.sync.where('userId').equals(userId).toArray())
@@ -198,10 +210,21 @@ async function applyChanges(database: TrainingDB, userId: string, changes: Chang
           .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
         localSnapshot = priorCopies[0]?.payload;
       }
+      if (unresolved) {
+        if (stable(unresolved.remotePayload) !== stable(change.document) && unresolved.remotePayload)
+          await saveRecovery(database, change.resource, change.id, unresolved.remotePayload, 'earlier cloud version during conflict');
+        await database.sync.put({ ...unresolved, remotePayload: change.deleted ? null : structuredClone(change.document),
+          remoteDeleted: change.deleted, remoteEtag: change.etag });
+        for (const item of pending) if (item.status !== 'conflict') await database.outbox.update(item.id, { status: 'conflict' });
+        await database.sync.put({ ...known, id: stateId, userId, kind: 'root', entity: change.resource,
+          entityId: change.id, etag: change.etag, version: change.version,
+          remoteDeleted: change.deleted, updatedAt: new Date().toISOString() });
+        continue;
+      }
       if (pending.length) {
         if (!change.deleted && localSnapshot && stable(localSnapshot) === stable(change.document)) {
           await database.outbox.bulkDelete(pending.map(item => item.id));
-          await database.sync.put({ id: stateId, userId, kind: 'root', entity: change.resource,
+          await database.sync.put({ ...known, id: stateId, userId, kind: 'root', entity: change.resource,
             entityId: change.id, etag: change.etag, version: change.version, remoteDeleted: false, updatedAt: new Date().toISOString() });
           await database.sync.delete(`conflict:${userId}:${change.resource}:${change.id}`);
           continue;
@@ -211,20 +234,20 @@ async function applyChanges(database: TrainingDB, userId: string, changes: Chang
           await database.outbox.delete(pending[0].id);
           for (const queued of pending.slice(1)) if (!queued.sentAt && queued.status !== 'conflict')
             await database.outbox.update(queued.id, { expectedEtag: change.etag, status: 'pending' });
-          await database.sync.put({ id: stateId, userId, kind: 'root', entity: change.resource,
+          await database.sync.put({ ...known, id: stateId, userId, kind: 'root', entity: change.resource,
             entityId: change.id, etag: change.etag, version: change.version, remoteDeleted: false, updatedAt: new Date().toISOString() });
           continue;
         }
         if (change.deleted && pending.length === 1 && pending[0].sentAt && pending[0].operation === 'delete') {
           await database.outbox.delete(pending[0].id);
-          await database.sync.put({ id: stateId, userId, kind: 'root', entity: change.resource,
+          await database.sync.put({ ...known, id: stateId, userId, kind: 'root', entity: change.resource,
             entityId: change.id, etag: change.etag, version: change.version, remoteDeleted: true, updatedAt: new Date().toISOString() });
           continue;
         }
         if (!change.deleted && pending[0].status === 'pending' && !pending[0].sentAt &&
             pending[0].expectedEtag === change.etag) {
           // The remote version is the acknowledged base for a newer local edit.
-          await database.sync.put({ id: stateId, userId, kind: 'root', entity: change.resource,
+          await database.sync.put({ ...known, id: stateId, userId, kind: 'root', entity: change.resource,
             entityId: change.id, etag: change.etag, version: change.version, remoteDeleted: false, updatedAt: new Date().toISOString() });
           continue;
         }
@@ -236,7 +259,7 @@ async function applyChanges(database: TrainingDB, userId: string, changes: Chang
             ? 'This record was deleted on another device.' : 'This record changed on another device.',
           createdAt: existingConflict?.createdAt ?? new Date().toISOString() });
         for (const item of pending) await database.outbox.update(item.id, { status: 'conflict' });
-        await database.sync.put({ id: stateId, userId, kind: 'root', entity: change.resource,
+        await database.sync.put({ ...known, id: stateId, userId, kind: 'root', entity: change.resource,
           entityId: change.id, etag: change.etag, version: change.version,
           remoteDeleted: change.deleted, updatedAt: new Date().toISOString() });
         continue;
@@ -259,7 +282,7 @@ async function applyChanges(database: TrainingDB, userId: string, changes: Chang
       } else {
         await rootTable.put(change.document as never);
       }
-      await database.sync.put({ id: stateId, userId, kind: 'root', entity: change.resource,
+      await database.sync.put({ ...known, id: stateId, userId, kind: 'root', entity: change.resource,
         entityId: change.id, etag: change.etag, version: change.version,
         remoteDeleted: change.deleted, updatedAt: new Date().toISOString() });
     }
@@ -298,50 +321,79 @@ async function resolveAwaitingMutations(database: TrainingDB, userId: string, to
   }
 }
 
-export async function resolveConflict(database: TrainingDB, conflictId: string, choice: 'keep-both' | 'use-cloud') {
+export async function conflictSnapshot(database: TrainingDB, conflictId: string): Promise<ConflictSnapshot> {
   const conflict = await database.sync.get(conflictId);
-  if (!conflict || conflict.kind !== 'conflict' || !conflict.entity || !conflict.entityId || !database.ownerId)
+  if (!conflict || conflict.kind !== 'conflict' || !conflict.entity || !conflict.entityId)
     throw new Error('Conflict is no longer available.');
+  const local = await syncRoot(database, conflict.entity).get(conflict.entityId as never);
+  return { local: local ?? null, remoteEtag: conflict.remoteEtag ?? null,
+    remotePayload: conflict.remotePayload ?? null, remoteDeleted: Boolean(conflict.remoteDeleted) };
+}
+
+export async function resolveConflict(database: TrainingDB, conflictId: string,
+  choice: 'use-cloud' | 'use-device' | 'edit-merge', expected: ConflictSnapshot, edited?: unknown) {
+  if (!database.ownerId) throw new Error('Sign in to resolve this conflict.');
   const userId = database.ownerId;
-  const entity = conflict.entity as SyncEntity;
-  const entityId = conflict.entityId;
-  const table = syncRoot(database, entity);
   await database.transaction('rw', [database.profile, database.exercises, database.plans,
     database.sessions, database.overrides, database.outbox, database.sync], async () => {
-    const local = (await table.get(entityId as never) ?? conflict.payload) as Record<string, unknown> | undefined;
-    if (local) await saveRecovery(database, entity, entityId, local, 'before conflict resolution');
+    const conflict = await database.sync.get(conflictId);
+    if (!conflict || conflict.kind !== 'conflict' || !conflict.entity || !conflict.entityId || conflict.userId !== userId)
+      throw new Error('Conflict is no longer available.');
+    const entity = conflict.entity;
+    const entityId = conflict.entityId;
+    const table = syncRoot(database, entity);
+    const local = await table.get(entityId as never) as unknown | undefined;
+    if (stable(local ?? null) !== stable(expected.local) || conflict.remoteEtag !== expected.remoteEtag ||
+        Boolean(conflict.remoteDeleted) !== expected.remoteDeleted ||
+        stable(conflict.remotePayload ?? null) !== stable(expected.remotePayload))
+      throw new Error('This record changed while you were reviewing it. Reopen the conflict before choosing.');
+    if (choice !== 'use-cloud' && conflict.remoteDeleted)
+      throw new Error('This record was deleted in the cloud. Its ID cannot be reused; choose Use cloud to keep a recovery copy.');
     const queued = await database.outbox.where('[userId+entity+entityId]')
       .equals([userId, entity, entityId]).toArray();
+    const recovered = new Set<string>();
+    const recover = async (value: unknown, reason: string) => {
+      if (value == null || recovered.has(stable(value))) return;
+      recovered.add(stable(value));
+      await saveRecovery(database, entity, entityId, value, reason);
+    };
+    await recover(local, 'local version before conflict resolution');
+    await recover(conflict.payload, 'earlier local version during conflict');
+    for (const item of queued) await recover(item.payload, 'queued local version before conflict resolution');
+    if (!local && queued.some(item => item.operation === 'delete'))
+      await saveRecovery(database, entity, entityId, null, 'local deletion before conflict resolution');
+    if (choice !== 'use-cloud') await recover(conflict.remotePayload, 'cloud version before conflict resolution');
     await database.outbox.bulkDelete(queued.map(item => item.id));
+    await database.sync.put({ id: syncRootId(userId, entity, entityId), userId, kind: 'root',
+      entity, entityId, etag: conflict.remoteEtag ?? null, version: etagVersion(conflict.remoteEtag),
+      remoteDeleted: Boolean(conflict.remoteDeleted), updatedAt: new Date().toISOString(),
+      resolvedAt: new Date().toISOString(), resolutionChoice: choice });
     if (choice === 'use-cloud') {
       if (conflict.remoteDeleted) await table.delete(entityId as never);
       else if (conflict.remotePayload) await table.put(conflict.remotePayload as never);
-      await database.sync.put({ id: syncRootId(userId, entity, entityId), userId, kind: 'root',
-        entity, entityId, etag: conflict.remoteEtag ?? null, version: etagVersion(conflict.remoteEtag),
-        remoteDeleted: Boolean(conflict.remoteDeleted), updatedAt: new Date().toISOString() });
-    } else if (local) {
-      if (entity === 'profile') {
-        if (!conflict.remoteDeleted && conflict.remotePayload) await table.put(conflict.remotePayload as never);
-        await enqueueChange(entity, entityId, 'upsert', local, database);
-      } else {
-        const copy = { ...local, id: crypto.randomUUID() };
-        if (!conflict.remoteDeleted && conflict.remotePayload) await table.put(conflict.remotePayload as never);
-        else await table.delete(entityId as never);
-        await table.put(copy as never);
-        await database.sync.delete(syncRootId(userId, entity, copy.id as string));
-        await enqueueChange(entity, copy.id as string, 'upsert', copy, database);
-        if (entity === 'plans') {
-          const overrides = await database.overrides.where('planId').equals(entityId).toArray();
-          for (const override of overrides) {
-            const overrideCopy = { ...override, id: crypto.randomUUID(), planId: copy.id as string };
-            await database.overrides.put(overrideCopy);
-            await enqueueChange('schedule-overrides', overrideCopy.id, 'upsert', overrideCopy, database);
-          }
-        }
-        await database.sync.put({ id: syncRootId(userId, entity, entityId), userId, kind: 'root',
-          entity, entityId, etag: conflict.remoteEtag ?? null, version: etagVersion(conflict.remoteEtag),
-          remoteDeleted: Boolean(conflict.remoteDeleted), updatedAt: new Date().toISOString() });
+      else throw new Error('Cloud record is unavailable. Refresh synchronization before resolving.');
+    } else if (choice === 'use-device') {
+      if (local) await enqueueChange(entity, entityId, 'upsert', local, database);
+      else await enqueueChange(entity, entityId, 'delete', null, database);
+    } else {
+      const schema = { profile: profileSchema, exercises: exerciseSchema, plans: planSchema,
+        sessions: sessionSchema, 'schedule-overrides': overrideSchema }[entity];
+      const document = schema.parse(edited) as { id: string };
+      if (document.id !== entityId) throw new Error('The resolved record must keep its original ID.');
+      if (entity === 'plans') {
+        const plan = planSchema.parse(document);
+        for (const workout of plan.workouts) for (const block of workout.blocks)
+          if (!await database.exercises.get(block.exerciseId))
+            throw new Error('The final plan references an exercise unavailable on this device. Choose an available exercise.');
       }
+      if (entity === 'schedule-overrides') {
+        const override = overrideSchema.parse(document);
+        const plan = await database.plans.get(override.planId);
+        if (!plan?.workouts.some(workout => workout.id === override.workoutId))
+          throw new Error('The final schedule change references a missing workout.');
+      }
+      await table.put(document as never);
+      await enqueueChange(entity, entityId, 'upsert', document, database);
     }
     await database.sync.delete(conflictId);
   });
@@ -355,17 +407,18 @@ export function startSyncCoordinator(userId: string, tokenProvider: TokenProvide
   let failures = 0;
   let retryAt = 0;
   let lastSuccessAt: string | null = null;
-  const status: SyncStatus = { state: navigator.onLine ? 'idle' : 'offline', pending: 0, conflicts: 0,
+  const status: SyncStatus = { state: navigator.onLine ? 'idle' : 'offline', pending: 0, conflicts: 0, failed: 0,
     lastSuccessAt, message: navigator.onLine ? '' : 'Offline; changes stay on this device.' };
   const publish = async (state = status.state, message = status.message) => {
     if (stopped) return;
     status.state = navigator.onLine ? state : 'offline'; status.message = navigator.onLine ? message : 'Offline; changes stay on this device.';
-    const [pending, conflicts, saved] = await Promise.all([
-      database.outbox.where('userId').equals(userId).count(),
+    const [outbox, conflicts, saved] = await Promise.all([
+      database.outbox.where('userId').equals(userId).toArray(),
       database.sync.where('userId').equals(userId).filter(item => item.kind === 'conflict').count(),
       database.sync.get(syncStateId(userId)),
     ]);
-    status.pending = pending; status.conflicts = conflicts; status.lastSuccessAt = saved?.updatedAt ?? lastSuccessAt;
+    status.pending = outbox.length; status.failed = outbox.filter(item => item.status === 'failed').length;
+    status.conflicts = conflicts; status.lastSuccessAt = saved?.updatedAt ?? lastSuccessAt;
     onStatus({ ...status });
   };
   const run = async () => {
@@ -395,9 +448,13 @@ export function startSyncCoordinator(userId: string, tokenProvider: TokenProvide
         }
         await resolveAwaitingMutations(database, userId, tokenProvider);
         lastSuccessAt = new Date().toISOString(); failures = 0; retryAt = 0;
-        const pending = await database.outbox.where('userId').equals(userId).count();
+        const remaining = await database.outbox.where('userId').equals(userId).toArray();
         await database.sync.update(syncStateId(userId), { updatedAt: lastSuccessAt });
-        await publish(pending ? 'idle' : 'idle', pending ? `${pending} change${pending === 1 ? '' : 's'} waiting to sync.` : 'All changes are synchronized.');
+        const failed = remaining.filter(item => item.status === 'failed').length;
+        const conflicts = await database.sync.where('userId').equals(userId).filter(item => item.kind === 'conflict').count();
+        await publish(failed ? 'error' : 'idle', failed ? `${failed} change${failed === 1 ? '' : 's'} failed to upload.`
+          : conflicts ? `${conflicts} conflict${conflicts === 1 ? '' : 's'} need your choice.`
+            : remaining.length ? `${remaining.length} change${remaining.length === 1 ? '' : 's'} waiting to sync.` : 'All changes are synchronized.');
       };
       if (navigator.locks) {
         await navigator.locks.request(`fitcoach-sync:${userId}`, { ifAvailable: true }, async lock => {

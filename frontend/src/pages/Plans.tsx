@@ -32,7 +32,7 @@ export function Plans() {
   </div>;
 }
 
-export function PlanEditor({ initial, onClose, onSave, saveLabel = 'Save plan' }: { initial: Plan; onClose: () => void; onSave: (plan: Plan) => Promise<void>; saveLabel?: string }) {
+export function PlanEditor({ initial, onClose, onSave, saveLabel = 'Save plan', title }: { initial: Plan; onClose: () => void; onSave: (plan: Plan) => Promise<void>; saveLabel?: string; title?: string }) {
   const { exercises, profile, run } = useApp();
   const [plan, setPlan] = useState(() => structuredClone(initial));
   const [index, setIndex] = useState(0);
@@ -50,7 +50,7 @@ export function PlanEditor({ initial, onClose, onSave, saveLabel = 'Save plan' }
     if (next < 0 || next >= w.blocks.length) return;
     [w.blocks[blockIndex], w.blocks[next]] = [w.blocks[next], w.blocks[blockIndex]];
   });
-  return <Modal title={saveLabel === 'Save plan' ? 'Plan editor' : 'Review proposal'} onClose={onClose} wide>
+  return <Modal title={title ?? (saveLabel === 'Save plan' ? 'Plan editor' : 'Review proposal')} onClose={onClose} wide>
     <div className="form-grid"><label>Plan name<input value={plan.name} maxLength={100} onChange={e => setPlan({ ...plan, name: e.target.value })} /></label><label>Schedule<select value={plan.schedule} onChange={e => setPlan({ ...plan, schedule: e.target.value as Plan['schedule'], cursor: 0 })}><option value="week">Weekday schedule</option><option value="rotation">Rotating sequence</option></select></label></div>
     <p className="field-hint">{plan.schedule === 'week' ? 'Choose training days for each workout. Missed days do not move the rest of the week.' : 'Complete the next workout to advance. Train whenever it works for you.'}</p>
     <div className="workout-tabs">{plan.workouts.map((w, i) => <button key={w.id} className={i === index ? 'selected' : ''} onClick={() => setIndex(i)}>{w.name || `Workout ${i + 1}`}</button>)}<button aria-label="Add workout" onClick={() => { setPlan({ ...plan, workouts: [...plan.workouts, { id: uid(), name: `Workout ${String.fromCharCode(65 + plan.workouts.length)}`, days: [], blocks: [] }] }); setIndex(plan.workouts.length); }}><Plus size={18} /></button></div>

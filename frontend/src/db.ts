@@ -35,13 +35,14 @@ export type SyncEntity = 'profile' | 'exercises' | 'plans' | 'sessions' | 'sched
 export interface PendingChange {
   id: string; userId: string; createdAt: string; entity: SyncEntity; entityId: string;
   operation: 'upsert' | 'delete'; payload: unknown; expectedEtag: string | null;
-  localRevision: number; status: 'pending' | 'awaiting-remote' | 'conflict' | 'failed'; sentAt?: string;
+  localRevision: number; status: 'pending' | 'awaiting-remote' | 'conflict' | 'failed'; sentAt?: string; error?: string;
 }
 export interface SyncRecord {
   id: string; userId: string; kind: 'state' | 'root' | 'conflict' | 'recovery';
   entity?: SyncEntity; entityId?: string; cursor?: number; bootstrapComplete?: boolean;
   etag?: string | null; version?: number; remoteDeleted?: boolean; payload?: unknown; remotePayload?: unknown;
   remoteEtag?: string | null; reason?: string; createdAt?: string; updatedAt?: string;
+  resolvedAt?: string; resolutionChoice?: 'use-cloud' | 'use-device' | 'edit-merge';
 }
 export const legacyDb = new TrainingDB('fitcoach-v1');
 export let db = legacyDb;

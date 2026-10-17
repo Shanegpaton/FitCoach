@@ -46,7 +46,7 @@ export function App() {
   }, [auth.userId]);
   useEffect(() => {
     if (!auth.userId || readyForUser !== auth.userId || !auth.session) {
-      setSyncStatus(auth.userId ? { state: 'offline', pending: 0, conflicts: 0,
+      setSyncStatus(auth.userId ? { state: 'offline', pending: 0, conflicts: 0, failed: 0,
         lastSuccessAt: null, message: 'Sign in online to synchronize. Local changes are safe.' } : null);
       return;
     }
@@ -113,6 +113,7 @@ export function App() {
   const active = data.sessions.filter(s => s.status === 'active').sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
   const syncLabel = !syncStatus ? 'Private training space' : syncStatus.state === 'offline'
     ? 'Offline · saved here' : syncStatus.conflicts ? `${syncStatus.conflicts} conflict${syncStatus.conflicts === 1 ? '' : 's'}`
+      : syncStatus.failed ? `${syncStatus.failed} failed`
       : syncStatus.state === 'syncing' ? 'Syncing…' : syncStatus.state === 'error'
         ? 'Sync needs attention' : Math.max(syncStatus.pending, localPending) ? `${Math.max(syncStatus.pending, localPending)} pending` : 'Synced';
   return <AppContext.Provider value={{ ...data, notify, run }}>
@@ -120,7 +121,7 @@ export function App() {
       <header className="app-header"><Link to="/" className="brand" aria-label="FitCoach home"><span className="brand-mark">f.</span><span>fitcoach<span className="brand-dot">.</span></span></Link>
         <div className="header-right"><Link className="local-badge" to="/settings" aria-label={`Synchronization: ${syncStatus?.message ?? syncLabel}`}><span />{auth.offlineAccess ? 'Offline · saved here' : syncLabel}</Link><Link className="icon-button" to="/settings" aria-label="Settings"><SettingsIcon size={20} /></Link><button className="icon-button" aria-label="Sign out" title={auth.email ? `Sign out ${auth.email}` : 'Sign out'} onClick={() => void auth.signOut()}><LogOut size={18} /></button></div></header>
       {!online && <div className="connection-banner"><WifiOff size={15} /> Offline. Your training stays with you.</div>}
-      {syncStatus && (syncStatus.state === 'syncing' || syncStatus.state === 'error' || syncStatus.conflicts > 0 || syncStatus.pending > 0 || localPending > 0) && <Link to="/settings" className={`connection-banner sync-banner ${syncStatus.state === 'error' || syncStatus.conflicts ? 'sync-alert' : ''}`} role="status">{syncStatus.state === 'syncing' ? syncStatus.message : syncStatus.conflicts ? `${syncStatus.conflicts} sync conflict${syncStatus.conflicts === 1 ? '' : 's'} need your choice.` : syncStatus.state === 'error' ? syncStatus.message : `${Math.max(syncStatus.pending, localPending)} change${Math.max(syncStatus.pending, localPending) === 1 ? '' : 's'} waiting to sync.`} <span>View</span></Link>}
+      {syncStatus && (syncStatus.state === 'syncing' || syncStatus.state === 'error' || syncStatus.conflicts > 0 || syncStatus.pending > 0 || localPending > 0) && <Link to="/settings" className={`connection-banner sync-banner ${syncStatus.state === 'error' || syncStatus.conflicts ? 'sync-alert' : ''}`} role="status">{syncStatus.state === 'syncing' ? syncStatus.message : syncStatus.conflicts ? `${syncStatus.conflicts} sync conflict${syncStatus.conflicts === 1 ? '' : 's'} need your choice.` : syncStatus.failed ? `${syncStatus.failed} change${syncStatus.failed === 1 ? '' : 's'} failed to upload.` : syncStatus.state === 'error' ? syncStatus.message : `${Math.max(syncStatus.pending, localPending)} change${Math.max(syncStatus.pending, localPending) === 1 ? '' : 's'} waiting to sync.`} <span>View</span></Link>}
       {auth.error && <div className="connection-banner" role="status">{auth.error}{online && <button onClick={() => void auth.signIn()}>Sign in again</button>}</div>}
       {auth.offlineAccess && <div className="connection-banner">Offline access for this account. Workout logging stays local until you’re online and signed in.</div>}
       {needRefresh && <div className="connection-banner">A new version is ready. {active ? 'Finish your workout to update.' : <button onClick={() => run(() => updateServiceWorker(true))}>Update app</button>}</div>}
