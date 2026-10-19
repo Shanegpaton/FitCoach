@@ -1,0 +1,15 @@
+[Unit]
+Description=FitCoachGPT prototype noVNC loopback gateway
+After=fitcoach-vnc.service
+Requires=fitcoach-vnc.service
+
+[Service]
+Type=simple
+User=ubuntu
+Environment=HOME=/home/ubuntu
+ExecStart=/usr/bin/websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5901
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

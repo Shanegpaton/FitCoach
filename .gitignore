@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 backend/.env.local
 backend/.env.*.local
+prototype/chatgpt_vm/.private/
 
 # Mobile frontend
 frontend/node_modules/

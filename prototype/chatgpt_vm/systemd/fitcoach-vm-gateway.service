@@ -1,0 +1,19 @@
+[Unit]
+Description=FitCoachGPT VM ChatGPT sign-in gateway
+After=network-online.target fitcoach-vnc.service
+Wants=network-online.target
+Requires=fitcoach-vnc.service
+
+[Service]
+Type=simple
+User=ubuntu
+Environment=HOME=/home/ubuntu
+EnvironmentFile=/etc/fitcoach-vm.env
+WorkingDirectory=/home/ubuntu/fitcoach-prototype
+ExecStart=/home/ubuntu/fitcoach-prototype/.venv/bin/python -m prototype.chatgpt_vm.gateway serve
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

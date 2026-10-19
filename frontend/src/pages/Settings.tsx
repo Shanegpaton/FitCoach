@@ -7,6 +7,7 @@ import { db, exportBackup, importBackup, putLocalChange } from '../db';
 import { useApp } from '../state';
 import { Days, Modal, SectionTitle } from '../ui';
 import { ConflictReview } from './ConflictReview';
+import { ChatGPTConnection } from './ChatGPTConnection';
 
 function TrainingFields({ value, onChange }: { value: Profile; onChange: (profile: Profile) => void }) {
   return <><label>What are you working toward?<textarea value={value.goals} maxLength={2000} rows={3} placeholder="Build muscle, get stronger, feel more consistent…" onChange={e => onChange({ ...value, goals: e.target.value })} /></label>
@@ -81,6 +82,7 @@ export function Settings() {
     }} /></label></div><button className="text-button" onClick={() => run(async () => {
       const persistent = await navigator.storage?.persist?.(); notify(persistent ? 'Persistent storage enabled.' : 'Your browser manages storage. Keep regular exported backups.');
     })}>Request persistent storage</button></section>
+    <ChatGPTConnection />
     <section className="settings-card"><SectionTitle title="Take it to the gym"><Smartphone size={20} /></SectionTitle><p>Install FitCoach on your home screen after opening it once online. Your plans, logs, timers, and history work offline.</p><div className="install-steps"><div><span>01</span><p><strong>iPhone / iPad</strong>Open in Safari, tap Share, then Add to Home Screen.</p></div><div><span>02</span><p><strong>Android</strong>Open in Chrome, then choose Install app or Add to Home screen in the browser menu.</p></div></div><p className="field-hint">Installation requires HTTPS on phones. The current Coach uses sample responses and makes no model requests.</p></section>
     <p className="settings-footnote">FITCOACH · YOUR TRAINING, IN MOTION</p>
     {backup && <Modal title="Replace local data?" onClose={() => setBackup(null)}><p>This backup contains {backup.plans.length} plans and {backup.sessions.length} sessions. Importing replaces the data currently stored on this device, including {sessions.length} sessions.</p><p className="field-hint">Export your current data first if you want to keep it.</p><div className="action-row"><button className="button secondary" onClick={exportFile}>Export current data</button><button className="button primary" disabled={busy} onClick={async () => {

@@ -22,6 +22,13 @@ export default defineConfig(({ command, mode }) => {
       parsed.search || parsed.hash || parsed.username || parsed.password) {
       throw new Error('VITE_FITCOACH_API_URL must be the deployed API HTTPS origin, without a path or credentials.');
     }
+    const vmUrl = loadEnv(mode, process.cwd(), 'VITE_CHATGPT_VM_URL').VITE_CHATGPT_VM_URL;
+    if (vmUrl) {
+      let vm: URL;
+      try { vm = new URL(vmUrl); } catch { throw new Error('VITE_CHATGPT_VM_URL must be an HTTPS origin.'); }
+      if (vm.protocol !== 'https:' || !vm.hostname || vm.pathname !== '/' || vm.search || vm.hash ||
+          vm.username || vm.password) throw new Error('VITE_CHATGPT_VM_URL must be an HTTPS origin.');
+    }
   }
 
   return {

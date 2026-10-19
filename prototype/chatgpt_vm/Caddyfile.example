@@ -1,0 +1,21 @@
+# Replace the hostname with the VM's public HTTPS name. Only ports 80 and 443
+# are public; the gateway, VNC, and noVNC listen on VM loopback addresses.
+147-224-165-35.sslip.io {
+    header {
+        Referrer-Policy "no-referrer"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Cache-Control "no-store"
+    }
+
+    handle_path /browser/* {
+        forward_auth 127.0.0.1:8787 {
+            uri /v1/browser-auth
+        }
+        reverse_proxy 127.0.0.1:6080
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:8787
+    }
+}

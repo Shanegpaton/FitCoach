@@ -1,6 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, context }) => {
+  const unavailable = async (route: import('@playwright/test').Route) => {
+    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+      'Access-Control-Allow-Headers': 'authorization,content-type',
+      'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS' };
+    await route.fulfill({ status: route.request().method() === 'OPTIONS' ? 204 : 503,
+      headers, json: route.request().method() === 'OPTIONS' ? undefined : { detail: 'Test service unavailable' } });
+  };
+  await context.route('https://api.example.com/**', unavailable);
+  await context.route('https://vm.example.com/**', unavailable);
   await page.addInitScript(() => {
     localStorage.setItem('sb-fitcoach-e2e-auth-token', JSON.stringify({
       access_token: 'offline-test-access-token', refresh_token: 'offline-test-refresh-token', token_type: 'bearer',
@@ -8,6 +17,39 @@ test.beforeEach(async ({ page }) => {
       user: { id: 'e2e-user', aud: 'authenticated', role: 'authenticated', email: 'tester@example.com', app_metadata: { provider: 'google', providers: ['google'] }, user_metadata: {}, created_at: '2026-01-01T00:00:00.000Z' },
     }));
   });
+});
+
+test('VM connection pairs, opens the browser, and reports verified scope', async ({ page, context }) => {
+  let paired = false;
+  let connected = false;
+  const connection = () => ({ paired, connected, email: connected ? 'coach@example.com' : null,
+    name: connected ? 'Coach' : null, planUsageGranted: connected ? true : null });
+  await context.route('https://vm.example.com/v1/**', async route => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+      'Access-Control-Allow-Headers': 'authorization,content-type',
+      'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS' };
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (path === '/v1/launch/test') return route.fulfill({ body: '<h1>VM browser</h1>', contentType: 'text/html' });
+    if (path === '/v1/pair') paired = true;
+    if (path === '/v1/attempts/test') connected = true;
+    const body = path === '/v1/attempts' ? { id: 'test', state: 'pending', launchUrl: 'https://vm.example.com/v1/launch/test' }
+      : path === '/v1/attempts/test' ? { id: 'test', state: 'connected', connection: connection() }
+        : connection();
+    return route.fulfill({ json: body, headers });
+  });
+  await openApp(page);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'ChatGPT connection' })).toBeVisible();
+  await page.getByLabel('VM pairing code').fill('a'.repeat(24));
+  await page.getByRole('button', { name: 'Pair VM' }).click();
+  await expect(page.getByRole('button', { name: 'Connect ChatGPT' })).toBeVisible();
+  const popup = page.waitForEvent('popup');
+  await page.getByRole('button', { name: 'Connect ChatGPT' }).click();
+  await expect((await popup).getByRole('heading', { name: 'VM browser' })).toBeVisible();
+  await expect(page.getByText('Connected to Coach.')).toBeVisible();
+  await expect(page.getByText('ChatGPT plan usage: Granted at sign-in')).toBeVisible();
 });
 
 async function openApp(page: Page) {
@@ -51,7 +93,7 @@ test('empty history, onboarding editing, responsive layout and navigation', asyn
   await expect(page.getByLabel('What are you working toward?')).toHaveValue('Build strength and train consistently');
   await page.getByRole('combobox', { name: 'Weight unit', exact: true }).selectOption('kg');
   await page.getByRole('button', { name: 'Save profile' }).click();
-  await expect(page.getByRole('status')).toContainText('Profile saved');
+  await expect(page.getByRole('status').filter({ hasText: 'Profile saved' })).toBeVisible();
   await page.reload(); await expect(page.getByRole('combobox', { name: 'Weight unit', exact: true })).toHaveValue('kg');
   await page.getByRole('link', { name: 'FitCoach home' }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -140,7 +182,7 @@ test('backup export/import round trip and invalid import preserves plans', async
   await page.getByRole('button', { name: 'Export backup', exact: true }).click();
   const file = await downloaded; const backupPath = info.outputPath('backup.json'); await file.saveAs(backupPath);
   await page.getByLabel('Import backup', { exact: true }).setInputFiles({ name: 'invalid.json', mimeType: 'application/json', buffer: Buffer.from('{"version":99}') });
-  await expect(page.getByRole('alert')).toContainText('Invalid backup');
+  await expect(page.getByRole('alert').filter({ hasText: 'Invalid backup' })).toBeVisible();
   await page.getByRole('button', { name: 'Dismiss notification' }).click();
   await page.getByLabel('Import backup', { exact: true }).setInputFiles(backupPath);
   await expect(page.getByRole('dialog', { name: 'Replace local data?' })).toBeVisible();

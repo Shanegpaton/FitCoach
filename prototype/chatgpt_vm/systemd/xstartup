@@ -1,0 +1,4 @@
+#!/bin/sh
+export XAUTHORITY="$HOME/.Xauthority"
+firefox --new-window about:blank >/dev/null 2>&1 &
+exec openbox-session
