@@ -7,5 +7,7 @@ declare module '@novnc/novnc' {
     addEventListener(type: string, listener: (event: Event) => void): void;
     disconnect(): void;
     focus(): void;
+    blur(): void;
+    sendKey(keysym: number, code: string | null, down?: boolean): void;
   }
 }

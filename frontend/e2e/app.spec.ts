@@ -47,6 +47,7 @@ test('VM connection pairs, opens the in-app browser, and reports verified scope'
   await page.getByRole('button', { name: 'Connect ChatGPT' }).click();
   await expect(page.getByRole('dialog', { name: 'ChatGPT sign-in' })).toBeVisible();
   await expect(page.getByLabel('Interactive OpenAI sign-in browser')).toBeVisible();
+  await expect(page.getByLabel('Tap a field on OpenAI’s page, then type here with your phone keyboard.')).toBeVisible();
   await expect(page.getByText('Connected to Coach.')).toBeVisible();
   await expect(page.getByText('ChatGPT plan usage: Granted at sign-in')).toBeVisible();
 });

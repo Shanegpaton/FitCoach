@@ -352,6 +352,11 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 .chatgpt-viewer-status { margin: 0; padding: 8px 16px; }
 .chatgpt-viewer-screen { flex: 1; min-height: 0; overflow: hidden; background: #222; touch-action: none; }
 .chatgpt-viewer-screen canvas { max-width: none; }
+.chatgpt-viewer-keyboard { padding: 10px 16px; border-top: 1px solid #38452d; display: grid; gap: 8px; background: #1b2217; }
+.chatgpt-viewer-keyboard label { font-size: 12px; color: #d4dfc7; }
+.chatgpt-viewer-keyboard input { margin: 0; font-size: 16px; min-height: 44px; }
+.chatgpt-viewer-keys { display: flex; gap: 8px; }
+.chatgpt-viewer-keys .button { flex: 1; padding: 10px 7px; min-width: 0; font-size: 12px; }
 .install-steps { margin-top: 24px; }
 .install-steps > div { display: flex; gap: 14px; margin: 18px 0; }
 .install-steps span { font-size: 10px; color: var(--accent); padding-top: 4px; }

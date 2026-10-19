@@ -98,7 +98,9 @@ Browser tests use installed Google Chrome for desktop and Android-sized emulatio
 
 Settings can pair one FitCoach account to the Oracle VM and display its Firefox
 sign-in browser inside the PWA. The user completes OpenAI sign-in and permission
-review in that view; the OAuth callback and tokens remain on the VM. The PWA
+review in that view. On phones, tap the OpenAI field in the remote view, then
+use the keyboard relay below it to type and send Enter, Tab, or Backspace. The
+relay clears its input after each keystroke; the OAuth callback and tokens remain on the VM. The PWA
 receives only connection status and a short-lived viewer token. Coach still uses
 sample responses and makes no model requests. Set `VITE_CHATGPT_VM_URL` to the
 VM's HTTPS origin in the frontend deployment. See
