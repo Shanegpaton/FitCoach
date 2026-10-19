@@ -52,3 +52,17 @@ def test_protected_sign_in_delegates_browser_open_to_socket(monkeypatch):
             assert received == [b'https://auth.openai.com/api/accounts/authorize?x=1\n']
     finally:
         directory.cleanup()
+
+
+def test_reset_browser_removes_profile_after_stopping_firefox(tmp_path, monkeypatch):
+    profile = tmp_path / 'profile'
+    profile.mkdir()
+    (profile / 'cookies.sqlite').write_text('private session')
+    monkeypatch.setenv('FITCOACH_VM_FIREFOX_PROFILE', str(profile))
+    called = []
+    monkeypatch.setattr(browser_launcher.subprocess, 'run',
+                        lambda *args, **kwargs: called.append(args[0]))
+    monkeypatch.setattr(browser_launcher.time, 'sleep', lambda _: None)
+    browser_launcher.reset_browser()
+    assert called and 'firefox-esr' in called[0]
+    assert not profile.exists()

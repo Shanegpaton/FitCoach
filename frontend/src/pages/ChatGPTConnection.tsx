@@ -1,15 +1,16 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link2, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
 import { useAuth } from '../auth';
-import { backendChatGPTRequest, chatgptVmUrl, saveVmConnection, vmRequest, type ChatGPTAttempt, type ChatGPTConnection as Connection } from '../chatgptVm';
+import { backendChatGPTRequest, chatgptVmUrl, saveVmConnection, type ChatGPTAttempt, type ChatGPTConnection as Connection } from '../chatgptVm';
 import { SectionTitle } from '../ui';
 import { ChatGPTViewer } from './ChatGPTViewer';
 
 export function ChatGPTConnection() {
   const { userId, session, offlineAccess } = useAuth();
+  const activeUser = useRef(userId);
+  activeUser.current = userId;
   const [connection, setConnection] = useState<Connection | null>(null);
   const [attempt, setAttempt] = useState<ChatGPTAttempt | null>(null);
-  const [pairCode, setPairCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -18,7 +19,15 @@ export function ChatGPTConnection() {
   const reload = useCallback(async () => {
     if (!userId) return;
     const stored = await backendChatGPTRequest<Connection>(userId, 'connection').catch(() => null);
-    setConnection(stored?.connected ? stored : await vmRequest<Connection>(userId, '/v1/connection'));
+    if (activeUser.current !== userId) return;
+    if (stored?.connected) {
+      setConnection(stored);
+      const vm = await backendChatGPTRequest<Connection>(userId, 'vm/connection').catch(() => null);
+      if (activeUser.current === userId && vm?.paired && vm.connected) setConnection({ ...stored, vmCleanupPending: true });
+      return;
+    }
+    const vm = await backendChatGPTRequest<Connection>(userId, 'vm/connection');
+    if (activeUser.current === userId) setConnection(vm);
   }, [userId]);
 
   useEffect(() => {
@@ -34,7 +43,7 @@ export function ChatGPTConnection() {
       if (checking) return;
       checking = true;
       try {
-        const next = await vmRequest<ChatGPTAttempt>(userId, `/v1/attempts/${attempt.id}`);
+        const next = await backendChatGPTRequest<ChatGPTAttempt>(userId, `vm/attempts/${attempt.id}`);
         if (!active) return;
         if (next.state === 'connected') {
           setViewerOpen(false);
@@ -61,24 +70,11 @@ export function ChatGPTConnection() {
     return () => { active = false; window.clearInterval(timer); };
   }, [available, attempt?.id, attempt?.state, userId]);
 
-  const pair = async (e: FormEvent) => {
-    e.preventDefault(); if (!userId || busy) return;
-    setBusy(true); setError('');
-    try {
-      setConnection(await vmRequest<Connection>(userId, '/v1/pair', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: pairCode.trim() }),
-      }));
-      setPairCode('');
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not pair VM.'); }
-    finally { setBusy(false); }
-  };
-
   const connect = async () => {
     if (!userId || busy) return;
     setBusy(true); setError('');
     try {
-      const next = await vmRequest<ChatGPTAttempt>(userId, '/v1/attempts', { method: 'POST' });
+      const next = await backendChatGPTRequest<ChatGPTAttempt>(userId, 'vm/attempts', { method: 'POST' });
       setAttempt(next);
       if (next.viewerToken) setViewerOpen(true);
       else setError('The VM did not provide a browser session. Try again.');
@@ -96,7 +92,7 @@ export function ChatGPTConnection() {
         setConnection({ paired: false, connected: false, email: null, name: null, planUsageGranted: null });
         if (result.revocationConfirmed === false) setError('The backend copy was removed, but ChatGPT revocation was not confirmed. Disconnect FitCoachGPT in ChatGPT Settings.');
       } else {
-        await vmRequest<void>(userId, '/v1/connection', { method: 'DELETE' });
+        await backendChatGPTRequest<void>(userId, 'vm/connection', { method: 'DELETE' });
         setAttempt(null); setViewerOpen(false); await reload();
       }
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not disconnect.'); }
@@ -108,15 +104,16 @@ export function ChatGPTConnection() {
     {!chatgptVmUrl ? <p className="field-hint">The VM connection is not configured for this app deployment yet.</p>
       : !available ? <p className="field-hint">Sign in to FitCoachGPT while online to connect ChatGPT.</p>
         : connection === null ? <p aria-live="polite">Checking VM connection…</p>
-          : !connection.paired ? <form onSubmit={e => void pair(e)}><label>VM pairing code<input autoComplete="off" value={pairCode} onChange={e => setPairCode(e.target.value)} required minLength={20} /></label><p className="field-hint">Enter the one-time pairing code from the VM operator. This binds this VM to your FitCoach account.</p><button className="button secondary" disabled={busy} type="submit">Pair VM</button></form>
-            : <><div className="privacy-note"><ShieldCheck size={20} /><p>{connection.connected ? `Connected to ${connection.name || connection.email || 'your verified ChatGPT account'}.` : 'No ChatGPT account connected yet.'}</p></div>
+          : <><div className="privacy-note"><ShieldCheck size={20} /><p>{connection.connected ? `Connected to ${connection.name || connection.email || 'your verified ChatGPT account'}.` : 'No ChatGPT account connected yet.'}</p></div>
+              {connection.busy && <p role="status">The VM is in use. Try again in a few minutes.</p>}
               {connection.connected && <p aria-live="polite">ChatGPT plan usage: {connection.planUsageGranted ? 'Granted at sign-in' : 'Not granted'}</p>}
-              {connection.storedInBackend && <p aria-live="polite">Connection saved in the backend. You can stop the VM.</p>}
+              {connection.storedInBackend && <p aria-live="polite">{connection.vmCleanupPending === true ? 'Connection saved. VM cleanup is pending; try again shortly.' : connection.vmCleanupPending === false ? 'Connection saved in the backend. The VM session has been cleared.' : 'Connection saved in the backend.'}</p>}
               {connection.connected && !connection.storedInBackend && <button className="button secondary" disabled={busy} onClick={() => { if (userId) { setBusy(true); void saveVmConnection(userId).then(setConnection).catch(e => setError(e instanceof Error ? e.message : 'Could not save the connection.')).finally(() => setBusy(false)); } }}>Save connection to backend</button>}
+              {connection.vmCleanupPending && <button className="button secondary" disabled={busy} onClick={() => { if (userId) { setBusy(true); void backendChatGPTRequest<{ vmCleanupPending: boolean }>(userId, 'vm/cleanup', { method: 'POST' }).then(() => setConnection(current => current ? { ...current, vmCleanupPending: false } : current)).catch(e => setError(e instanceof Error ? e.message : 'Could not clear the VM.')).finally(() => setBusy(false)); } }}>Clear VM copy</button>}
               {attempt?.state === 'pending' && <p aria-live="polite">Complete sign-in and permission review on OpenAI’s page. This page will update when it finishes.</p>}
               {attempt?.state === 'pending' && attempt.viewerToken && !viewerOpen && <button className="button secondary" onClick={() => setViewerOpen(true)}>Resume sign-in</button>}
               {attempt && attempt.state !== 'pending' && attempt.state !== 'connected' && <p aria-live="polite">Sign-in {attempt.state}. You can try again.</p>}
-              <div className="action-row"><button className="button secondary" disabled={busy || attempt?.state === 'pending'} onClick={() => void connect()}><RefreshCw size={16} />{connection.connected ? 'Reconnect' : 'Connect ChatGPT'}</button>
+              <div className="action-row"><button className="button secondary" disabled={busy || connection.busy || attempt?.state === 'pending'} onClick={() => void connect()}><RefreshCw size={16} />{connection.connected ? 'Reconnect' : 'Connect ChatGPT'}</button>
                 {connection.connected && <button className="button secondary" disabled={busy} onClick={() => void disconnect()}><Unplug size={16} />{connection.storedInBackend ? 'Remove stored connection' : 'Disconnect'}</button>}
               </div></>}
     {error && <p className="field-hint" aria-live="polite">{error}</p>}

@@ -6,6 +6,9 @@ a different user, and only send a URL over this local Unix socket.
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
+import time
 from pathlib import Path
 import socket
 from urllib.parse import urlsplit
@@ -14,6 +17,20 @@ from .siwc import SignInError, open_vm_browser
 
 SOCKET = Path('/run/fitcoach-browser/launch.sock')
 MAX_URL_BYTES = 16384
+RESET = 'RESET'
+
+
+def reset_browser() -> None:
+    """Discard the dedicated desktop user's browser state between accounts."""
+    profile = Path(os.environ.get('FITCOACH_VM_FIREFOX_PROFILE',
+        Path.home() / '.local/share/fitcoach-firefox-profile'))
+    if profile.is_symlink():
+        raise SignInError('Firefox profile cannot be a symlink')
+    subprocess.run(['/usr/bin/pkill', '-u', str(os.getuid()), '-x', 'firefox-esr'],
+                   check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(0.5)
+    if profile.exists():
+        shutil.rmtree(profile)
 
 
 def approved_url(value: str) -> bool:
@@ -44,9 +61,12 @@ def serve(path: Path = SOCKET) -> None:
                             b'\n' in data[:-1] or b'\r' in data):
                         raise ValueError('Invalid browser request')
                     url = data[:-1].decode('utf-8')
-                    if not approved_url(url):
+                    if url == RESET:
+                        reset_browser()
+                    elif not approved_url(url):
                         raise ValueError('Unapproved browser URL')
-                    open_vm_browser(url)
+                    else:
+                        open_vm_browser(url)
                     connection.sendall(b'OK\n')
                 except (OSError, ValueError, UnicodeError, SignInError):
                     try:

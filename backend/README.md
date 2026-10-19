@@ -52,7 +52,7 @@ In the API project's Vercel environment settings, set:
 | `FITCOACH_SUPABASE_URL` | Your Supabase project HTTPS URL. |
 | `FITCOACH_SUPABASE_KEY` | Your Supabase publishable/anon key, used when checking bearer tokens with Supabase Auth. |
 | `FITCOACH_CORS_ORIGINS` | Exact HTTPS origin of the PWA, with no trailing slash. Use a comma-separated list only if more origins are intentionally allowed. |
-| `FITCOACH_CHATGPT_VM_ORIGIN` | Exact HTTPS origin of the paired VM for the one-use credential handoff. |
+| `FITCOACH_CHATGPT_VM_ORIGIN` | Exact HTTPS origin of the shared VM for sign-in control and the one-use credential handoff. |
 | `FITCOACH_CHATGPT_SECRET` | A 32-byte base64url secret shared only with the VM's `FITCOACH_VM_HANDOFF_KEY`. It also derives the database encryption key. |
 
 Provision the restricted runtime role and run `alembic -c backend/alembic.ini upgrade head` with `FITCOACH_MIGRATION_DATABASE_URL` from a trusted local or CI environment **before** deploying the function. Do not run migrations during a function startup or give Vercel migration credentials. The API checks its runtime role and schema on each cold start and fails closed if they are unsafe or missing.
@@ -73,6 +73,9 @@ Set the frontend Vercel project's `VITE_FITCOACH_API_URL` to the API deployment'
 | `/v1/sync/records/{resource}/{client_id}` | GET one current record after an upload conflict |
 | `/v1/sync/mutations` | POST up to 50 independently committed, idempotent aggregate mutations |
 | `/v1/chatgpt/connection` | GET metadata, DELETE encrypted credentials; never returns tokens |
+| `/v1/chatgpt/vm/connection`, `/v1/chatgpt/vm/attempts`, `/v1/chatgpt/vm/attempts/{id}` | Authenticated VM status, exclusive session start, and sign-in polling |
+| `/v1/chatgpt/vm/save` | POST server-side credential handoff; confirms VM cleanup after database commit |
+| `/v1/chatgpt/vm/cleanup` | POST clear this account's leftover VM copy only after confirming a stored backend record |
 | `/v1/chatgpt/handoff` | POST a one-use VM handoff code; the API redeems it server-to-server and stores encrypted credentials |
 | `/v1/chatgpt/coach` | POST recent messages and bounded training context; returns a completed text reply with no token data |
 
@@ -80,6 +83,10 @@ Migration `0003` creates `fitcoach.chatgpt_credentials` with forced row-level se
 owner-scoped runtime grants. The API encrypts the complete verified OpenAI credential record before
 writing it to PostgreSQL. The browser receives only account display information and granted-plan
 status. The VM and API must share the handoff secret; do not put it in the PWA project or Git.
+The API forwards the verified account's bearer token to the VM, which independently verifies it.
+The VM admits one account at a time for five minutes. The API confirms cleanup only after the
+encrypted record is committed. If confirmation fails, Settings reports pending cleanup and the
+VM retains the lease until it can clear the browser before another account enters.
 Run Alembic before deploying code that uses these endpoints. Once Settings confirms the backend
 copy, the VM can be stopped. When plan usage is granted, Coach calls the API, which serializes refreshes per account, selects an available model from that account's catalog, and consumes a `store: false`, `stream: true` Responses API request through completion. The PWA never receives an OpenAI token. Removing the backend record attempts OpenAI refresh-token revocation directly
 from the API even if the VM is off; if revocation cannot be confirmed, Settings tells the user.

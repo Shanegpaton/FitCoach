@@ -145,6 +145,46 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                 'planUsageGranted': row['plan_usage_granted'] if row else None,
                 'storedInBackend': bool(row)}
 
+    async def vm_control(request: Request, path: str, method: str = 'GET') -> dict:
+        try:
+            origin = chatgpt.vm_origin()
+        except ValueError:
+            raise HTTPException(503, 'ChatGPT VM is not configured') from None
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+                result = await client.request(method, f'{origin}/v1/{path}',
+                    headers={'Authorization': request.headers['authorization']})
+        except httpx.RequestError:
+            raise HTTPException(503, 'The VM is unavailable') from None
+        if result.status_code == 204:
+            return {}
+        if result.status_code != 200:
+            try:
+                detail = result.json().get('detail', 'The VM request failed')
+            except (ValueError, AttributeError):
+                detail = 'The VM request failed'
+            raise HTTPException(result.status_code if result.status_code in (403, 404, 409, 503) else 502, detail)
+        try:
+            return result.json()
+        except ValueError:
+            raise HTTPException(502, 'The VM returned an invalid response') from None
+
+    @app.get('/v1/chatgpt/vm/connection')
+    async def vm_connection(request: Request, user: User):
+        return await vm_control(request, 'connection')
+
+    @app.post('/v1/chatgpt/vm/attempts')
+    async def vm_start(request: Request, user: User):
+        return await vm_control(request, 'attempts', 'POST')
+
+    @app.get('/v1/chatgpt/vm/attempts/{attempt_id}')
+    async def vm_attempt(attempt_id: UUID, request: Request, user: User):
+        return await vm_control(request, f'attempts/{attempt_id}')
+
+    @app.delete('/v1/chatgpt/vm/connection')
+    async def vm_disconnect(request: Request, user: User):
+        return await vm_control(request, 'connection', 'DELETE')
+
     @app.post('/v1/chatgpt/handoff')
     async def claim_chatgpt_handoff(body: ChatGPTHandoff, request: Request, user: User):
         try:
@@ -177,8 +217,50 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                         plan_usage_granted = EXCLUDED.plan_usage_granted, updated_at = now()'''),
                     {'user_id': user, 'ciphertext': ciphertext, 'email': record.get('email'),
                      'name': record.get('name'), 'granted': record['plan_usage_granted']})
+        cleanup_pending = False
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+                confirmed = await client.post(f'{origin}/v1/handoff/confirm',
+                    headers={'Authorization': authorization, 'X-FitCoach-Handoff-Key': secret})
+            cleanup_pending = confirmed.status_code != 204
+        except httpx.RequestError:
+            cleanup_pending = True
         return {'connected': True, 'email': record.get('email'), 'name': record.get('name'),
-                'planUsageGranted': record['plan_usage_granted'], 'storedInBackend': True}
+                'planUsageGranted': record['plan_usage_granted'], 'storedInBackend': True,
+                'vmCleanupPending': cleanup_pending}
+
+    @app.post('/v1/chatgpt/vm/save')
+    async def save_vm_connection(request: Request, user: User):
+        handoff = await vm_control(request, 'handoff', 'POST')
+        try:
+            body = ChatGPTHandoff(code=handoff['code'])
+        except (KeyError, TypeError, ValidationError):
+            raise HTTPException(502, 'The VM returned an invalid handoff') from None
+        return await claim_chatgpt_handoff(body, request, user)
+
+    @app.post('/v1/chatgpt/vm/cleanup')
+    async def cleanup_vm_connection(request: Request, user: User):
+        async with database.sessions() as session:
+            async with session.begin():
+                await set_identity(session, user)
+                stored = await session.scalar(sa.text('''SELECT 1 FROM fitcoach.chatgpt_credentials
+                    WHERE user_id = :user_id'''), {'user_id': user})
+        if not stored:
+            raise HTTPException(409, 'Save the connection before clearing the VM')
+        current = await vm_control(request, 'connection')
+        if not current.get('paired') or not current.get('connected'):
+            return {'vmCleanupPending': False}
+        try:
+            origin = chatgpt.vm_origin()
+            secret = chatgpt.handoff_secret()
+            async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+                result = await client.post(f'{origin}/v1/handoff/confirm', headers={
+                    'Authorization': request.headers['authorization'], 'X-FitCoach-Handoff-Key': secret})
+        except (ValueError, httpx.RequestError):
+            raise HTTPException(503, 'The VM could not be cleared') from None
+        if result.status_code != 204:
+            raise HTTPException(503, 'The VM could not be cleared')
+        return {'vmCleanupPending': False}
 
     @app.delete('/v1/chatgpt/connection')
     async def delete_chatgpt_connection(user: User):

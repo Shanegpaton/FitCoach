@@ -40,7 +40,8 @@ def setup(tmp_path):
 
     vm = gateway.Gateway(tmp_path / 'private', 'https://auth.example', 'anon',
                          'https://vm.example', 'https://app.example,https://old-app.example',
-                         verify_user=verify, launch_process=lambda _: process)
+                         verify_user=verify, launch_process=lambda _: process,
+                         reset_browser=lambda: None)
     client = TestClient(gateway.create_app(vm), follow_redirects=False)
     return vm, client, process, owner, other
 
@@ -65,36 +66,27 @@ def test_cors_accepts_configured_app_origins_only(setup):
     assert response.status_code == 400
 
 
-def test_pairing_owner_isolation_and_launch_replay(setup):
+def test_exclusive_lease(setup):
     vm, client, process, owner, _ = setup
-    code = gateway.create_pair_code(vm.storage)
     assert client.get('/v1/connection', headers=auth()).json()['paired'] is False
-    assert client.post('/v1/pair', headers=auth(), json={'code': 'x' * 24}).status_code == 403
-    assert client.post('/v1/pair', headers=auth(), json={'code': code}).json()['paired'] is True
-    assert siwc.private_read(vm.storage / 'owner.json')['user_id'] == owner
-    assert client.get('/v1/connection', headers=auth('other')).status_code == 403
-    assert client.post('/v1/attempts', headers=auth('other')).status_code == 403
-
+    assert client.post('/v1/pair', headers=auth(), json={'code': 'x' * 24}).status_code == 404
     attempt = client.post('/v1/attempts', headers=auth()).json()
+    assert siwc.private_read(vm.storage / 'owner.json')['user_id'] == owner
+    assert client.get('/v1/connection', headers=auth('other')).json()['busy'] is True
+    assert client.post('/v1/attempts', headers=auth('other')).status_code == 409
+
     assert attempt['state'] == 'pending'
-    assert client.post('/v1/attempts', headers=auth()).status_code == 409
-    path = attempt['launchUrl'].removeprefix('https://vm.example')
-    launched = client.get(path)
-    assert launched.status_code == 303
-    assert launched.headers['location'].startswith('/browser/vnc.html')
-    assert 'httponly' in launched.headers['set-cookie'].lower()
-    assert client.get(path).status_code == 404
-    assert client.get('/v1/browser-auth').status_code == 401
-    browser_cookie = launched.cookies.get('fitcoach_vm_browser')
-    assert client.get('/v1/browser-auth', cookies={'fitcoach_vm_browser': browser_cookie}).status_code == 204
+    resumed = client.post('/v1/attempts', headers=auth()).json()
+    assert resumed['id'] == attempt['id']
+    assert resumed['viewerToken'] != attempt['viewerToken']
+    assert 'launchUrl' not in attempt
+    assert client.get('/v1/browser-auth').status_code == 404
     process.done.set()
     process.wait(1)
 
 
-def test_finished_attempt_cannot_open_browser(setup):
+def test_finished_attempt_closes_viewer(setup):
     vm, client, process, _, _ = setup
-    code = gateway.create_pair_code(vm.storage)
-    client.post('/v1/pair', headers=auth(), json={'code': code})
     attempt = client.post('/v1/attempts', headers=auth()).json()
     process.done.set()
     for _ in range(100):
@@ -102,13 +94,14 @@ def test_finished_attempt_cannot_open_browser(setup):
         if status['state'] != 'pending': break
         threading.Event().wait(0.01)
     assert status['state'] == 'declined'
-    assert client.get(attempt['launchUrl'].removeprefix('https://vm.example')).status_code == 404
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect('/v1/viewer', headers={'origin': 'https://app.example'},
+                                      subprotocols=[f"fitcoach.{attempt['viewerToken']}"]):
+            pass
 
 
 def test_embedded_viewer_requires_attempt_token_and_app_origin(setup, monkeypatch):
     vm, client, process, _, _ = setup
-    code = gateway.create_pair_code(vm.storage)
-    client.post('/v1/pair', headers=auth(), json={'code': code})
     attempt = client.post('/v1/attempts', headers=auth()).json()
     protocol = f"fitcoach.{attempt['viewerToken']}"
 
@@ -141,8 +134,6 @@ def test_embedded_viewer_requires_attempt_token_and_app_origin(setup, monkeypatc
 
 def test_attempt_success_and_disconnect_cancel(setup, monkeypatch):
     vm, client, process, _, _ = setup
-    code = gateway.create_pair_code(vm.storage)
-    client.post('/v1/pair', headers=auth(), json={'code': code})
     attempt = client.post('/v1/attempts', headers=auth()).json()
     siwc.private_write(vm.storage / 'credentials.json', {'email': 'verified@example.com',
         'name': 'Verified', 'plan_usage_granted': True})
@@ -154,31 +145,26 @@ def test_attempt_success_and_disconnect_cancel(setup, monkeypatch):
     assert result['state'] == 'connected'
     assert result['connection']['email'] == 'verified@example.com'
     assert result['connection']['planUsageGranted'] is True
-    monkeypatch.setattr(siwc, 'disconnect', lambda storage: (storage / 'credentials.json').unlink(missing_ok=True))
     assert client.delete('/v1/connection', headers=auth()).status_code == 204
     assert client.get('/v1/connection', headers=auth()).json()['connected'] is False
 
 
-def test_pair_code_expiry_and_pending_cancellation(setup, monkeypatch):
+def test_lease_expiry_and_pending_cancellation(setup, monkeypatch):
     vm, client, process, _, _ = setup
-    code = gateway.create_pair_code(vm.storage)
-    pair_file = vm.storage / 'pairing.json'
-    stored = siwc.private_read(pair_file)
-    siwc.private_write(pair_file, {**stored, 'expires_at': 0})
-    assert client.post('/v1/pair', headers=auth(), json={'code': code}).status_code == 403
-    code = gateway.create_pair_code(vm.storage)
-    client.post('/v1/pair', headers=auth(), json={'code': code})
     attempt = client.post('/v1/attempts', headers=auth()).json()
-    monkeypatch.setattr(siwc, 'disconnect', lambda _: None)
-    assert client.delete('/v1/connection', headers=auth()).status_code == 204
+    stored = siwc.private_read(vm.storage / 'owner.json')
+    siwc.private_write(vm.storage / 'owner.json', {**stored, 'expires_at': 0})
+    assert client.get('/v1/connection', headers=auth('other')).json()['busy'] is False
     assert process.terminated
-    assert client.get(f"/v1/attempts/{attempt['id']}", headers=auth()).json()['state'] == 'declined'
+    assert client.post('/v1/attempts', headers=auth('other')).status_code == 200
+    # The original owner can no longer access the new lease.
+    assert client.get(f"/v1/attempts/{attempt['id']}", headers=auth()).status_code == 403
+    vm.stop()
 
 
 def test_handoff_requires_owner_service_key_and_is_single_use(setup, monkeypatch):
     vm, client, _, owner, _ = setup
-    code = gateway.create_pair_code(vm.storage)
-    client.post('/v1/pair', headers=auth(), json={'code': code})
+    client.post('/v1/attempts', headers=auth())
     siwc.private_write(vm.storage / 'credentials.json', {'access_token': 'access',
         'refresh_token': 'refresh', 'id_token': 'id', 'client_id': 'oaiapp_test'})
     monkeypatch.setenv('FITCOACH_VM_HANDOFF_KEY', 'secret-' * 8)
@@ -197,3 +183,32 @@ def test_handoff_requires_owner_service_key_and_is_single_use(setup, monkeypatch
                        json={'code': another}).status_code == 403
     vm.handoffs[gateway.hashlib.sha256(another.encode()).hexdigest()] = (owner, 0)
     assert client.post('/v1/handoff/redeem', headers=headers, json={'code': another}).status_code == 404
+
+
+def test_confirm_clears_vm_before_next_account(setup, monkeypatch):
+    vm, client, _, _, _ = setup
+    monkeypatch.setenv('FITCOACH_VM_HANDOFF_KEY', 'secret-' * 8)
+    assert client.post('/v1/attempts', headers=auth()).status_code == 200
+    siwc.private_write(vm.storage / 'credentials.json', {'refresh_token': 'secret'})
+    headers = {**auth(), 'X-FitCoach-Handoff-Key': 'secret-' * 8}
+    assert client.post('/v1/handoff/confirm', headers=auth()).status_code == 403
+    assert (vm.storage / 'credentials.json').exists()
+    assert client.post('/v1/handoff/confirm', headers=headers).status_code == 204
+    assert not (vm.storage / 'credentials.json').exists()
+    assert not (vm.storage / 'owner.json').exists()
+    assert client.post('/v1/attempts', headers=auth('other')).status_code == 200
+
+
+def test_cleanup_failure_keeps_account_lease_and_credentials(setup, monkeypatch):
+    vm, client, _, _, _ = setup
+    monkeypatch.setenv('FITCOACH_VM_HANDOFF_KEY', 'secret-' * 8)
+    assert client.post('/v1/attempts', headers=auth()).status_code == 200
+    siwc.private_write(vm.storage / 'credentials.json', {'refresh_token': 'secret'})
+    def fail_reset():
+        raise OSError('launcher unavailable')
+    vm.reset_browser = fail_reset
+    response = client.post('/v1/handoff/confirm', headers={
+        **auth(), 'X-FitCoach-Handoff-Key': 'secret-' * 8})
+    assert response.status_code == 503
+    assert (vm.storage / 'credentials.json').exists()
+    assert client.post('/v1/attempts', headers=auth('other')).status_code == 409

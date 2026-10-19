@@ -8,13 +8,6 @@
         Cache-Control "no-store"
     }
 
-    handle_path /browser/* {
-        forward_auth 127.0.0.1:8787 {
-            uri /v1/browser-auth
-        }
-        reverse_proxy 127.0.0.1:6080
-    }
-
     handle {
         reverse_proxy 127.0.0.1:8787
     }

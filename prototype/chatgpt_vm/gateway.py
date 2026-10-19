@@ -1,8 +1,4 @@
-"""Single-owner, VM-local gateway for the FitCoachGPT sign-in prototype.
-
-Expose only through an HTTPS reverse proxy which protects /browser/* with
-GET /v1/browser-auth. OpenAI credentials never leave this process's VM.
-"""
+"""Exclusive-lease VM gateway for the FitCoachGPT sign-in prototype."""
 from __future__ import annotations
 
 import hashlib
@@ -11,6 +7,7 @@ import asyncio
 import os
 from pathlib import Path
 import secrets
+import socket
 import subprocess
 import sys
 import threading
@@ -19,17 +16,11 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import siwc
-
-
-class PairBody(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    code: str = Field(min_length=20, max_length=100)
 
 
 class HandoffBody(BaseModel):
@@ -39,7 +30,7 @@ class HandoffBody(BaseModel):
 
 class Gateway:
     def __init__(self, storage: Path, supabase_url: str, supabase_key: str, public_origin: str,
-                 pwa_origin: str, verify_user=None, launch_process=None):
+                 pwa_origin: str, verify_user=None, launch_process=None, reset_browser=None):
         pwa_origins = [origin.strip().rstrip('/') for origin in pwa_origin.split(',') if origin.strip()]
         if not public_origin.startswith('https://') or not pwa_origins or any(
                 (parsed := urlsplit(origin)).scheme != 'https' or not parsed.netloc or
@@ -56,10 +47,9 @@ class Gateway:
         self.pwa_origins = pwa_origins
         self.verify_user_override = verify_user
         self.launch_process = launch_process or self._launch_process
+        self.reset_browser = reset_browser or self._reset_browser
         self.lock = threading.RLock()
         self.attempt: dict | None = None
-        self.tickets: dict[str, tuple[str, float]] = {}
-        self.sessions: dict[str, float] = {}
         self.viewers: dict[str, tuple[str, float]] = {}
         self.handoffs: dict[str, tuple[str, float]] = {}
 
@@ -85,17 +75,62 @@ class Gateway:
         except (KeyError, TypeError, ValueError):
             raise HTTPException(503, 'Invalid authentication response') from None
 
+    @staticmethod
+    def _reset_browser() -> None:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(10)
+            client.connect('/run/fitcoach-browser/launch.sock')
+            client.sendall(b'RESET\n')
+            if client.recv(32) != b'OK\n':
+                raise OSError('Browser cleanup failed')
+
     def owner(self) -> str | None:
-        record = siwc.private_read(self.storage / 'owner.json')
-        return record['user_id'] if record else None
+        with self.lock:
+            record = siwc.private_read(self.storage / 'owner.json')
+            stale_legacy = (record and 'expires_at' not in record and
+                            not (self.storage / 'credentials.json').exists() and
+                            not (self.attempt and self.attempt['state'] == 'pending'))
+            expired = record and time.time() >= record.get('expires_at', float('inf')) + (
+                120 if self.attempt and self.attempt['state'] == 'connected' else 0)
+            if stale_legacy or expired:
+                try:
+                    self._release()
+                except OSError:
+                    raise HTTPException(503, 'The VM browser could not be cleared') from None
+                return None
+            return record['user_id'] if record else None
+
+    def _release(self) -> None:
+        attempt = self.attempt
+        if attempt and attempt['state'] == 'pending':
+            attempt['cancelled'] = True
+            attempt['process'].terminate()
+            try:
+                attempt['process'].wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                attempt['process'].kill()
+                attempt['process'].wait(timeout=5)
+            attempt['state'] = 'declined'
+        # Fail closed: another account cannot enter until browser state is gone.
+        self.reset_browser()
+        (self.storage / 'credentials.json').unlink(missing_ok=True)
+        (self.storage / 'host.json').unlink(missing_ok=True)
+        (self.storage / 'owner.json').unlink(missing_ok=True)
+        self.attempt = None
+        self.viewers.clear()
+        self.handoffs.clear()
 
     def require_owner(self, user_id: str) -> None:
         if self.owner() != user_id:
-            raise HTTPException(403, 'This VM is not linked to your FitCoach account')
+            raise HTTPException(403, 'This VM session belongs to another account or has expired')
 
-    def connection(self) -> dict:
+    def connection(self, user_id: str | None = None) -> dict:
         record = siwc.private_read(self.storage / 'credentials.json')
-        return {'paired': self.owner() is not None, 'connected': record is not None,
+        owner = self.owner()
+        if owner != user_id:
+            record = None
+        return {'paired': owner == user_id, 'busy': owner is not None and owner != user_id,
+                'connected': record is not None,
                 'email': record.get('email') if record else None,
                 'name': record.get('name') if record else None,
                 'planUsageGranted': record.get('plan_usage_granted') if record else None}
@@ -133,24 +168,48 @@ class Gateway:
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, close_fds=True)
 
-    def start(self) -> dict:
+    def start(self, user_id: str) -> dict:
         with self.lock:
+            current = self.owner()
+            if current and current != user_id:
+                raise HTTPException(409, 'The VM is in use. Try again in a few minutes.')
             if self.attempt and self.attempt['state'] == 'pending':
-                raise HTTPException(409, 'A sign-in attempt is already running')
+                self.viewers.clear()
+                viewer = secrets.token_urlsafe(32)
+                lease = siwc.private_read(self.storage / 'owner.json')
+                self.viewers[viewer] = (self.attempt['id'], min(lease.get('expires_at', time.time() + 300), time.time() + 300))
+                return {'id': self.attempt['id'], 'state': 'pending', 'viewerToken': viewer}
+            if current and siwc.private_read(self.storage / 'credentials.json'):
+                raise HTTPException(409, 'Save the completed connection before starting again')
+            if current is None:
+                if (self.storage / 'credentials.json').exists():
+                    raise HTTPException(503, 'An unclaimed VM credential needs operator recovery')
+                try:
+                    self.reset_browser()
+                except OSError:
+                    raise HTTPException(503, 'The VM browser could not be cleared') from None
+                siwc.private_write(self.storage / 'owner.json',
+                                   {'user_id': user_id, 'expires_at': time.time() + 300})
+            else:
+                try:
+                    self.reset_browser()
+                except OSError:
+                    raise HTTPException(503, 'The VM browser could not be cleared') from None
             path = self.storage / 'credentials.json'
             before = path.stat().st_mtime_ns if path.exists() else None
-            process = self.launch_process(self.storage)
+            try:
+                process = self.launch_process(self.storage)
+            except OSError:
+                self._release()
+                raise HTTPException(503, 'The VM sign-in service could not start') from None
             attempt_id = str(uuid4())
-            ticket = secrets.token_urlsafe(32)
             self.attempt = {'id': attempt_id, 'state': 'pending', 'started': time.time(),
                             'process': process, 'before': before, 'cancelled': False}
-            self.tickets[ticket] = (attempt_id, time.time() + 120)
             viewer = secrets.token_urlsafe(32)
-            self.viewers[viewer] = (attempt_id, time.time() + 600)
+            lease = siwc.private_read(self.storage / 'owner.json')
+            self.viewers[viewer] = (attempt_id, lease.get('expires_at', time.time() + 300))
             threading.Thread(target=self._watch, args=(attempt_id,), daemon=True).start()
-            return {'id': attempt_id, 'state': 'pending',
-                    'launchUrl': f'{self.public_origin}/v1/launch/{ticket}',
-                    'viewerToken': viewer}
+            return {'id': attempt_id, 'state': 'pending', 'viewerToken': viewer}
 
     def _watch(self, attempt_id: str) -> None:
         with self.lock:
@@ -179,32 +238,10 @@ class Gateway:
 
     def stop(self) -> None:
         with self.lock:
-            attempt = self.attempt
-            if attempt and attempt['state'] == 'pending':
-                attempt['cancelled'] = True
-                attempt['process'].terminate()
-                try:
-                    attempt['process'].wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    attempt['process'].kill()
-                    attempt['process'].wait(timeout=5)
-                attempt['state'] = 'declined'
-            siwc.disconnect(self.storage)
-            self.tickets.clear()
-            self.sessions.clear()
-            self.viewers.clear()
-            self.handoffs.clear()
-
-
-def create_pair_code(storage: Path) -> str:
-    siwc.private_dir(storage)
-    if siwc.private_read(storage / 'owner.json'):
-        raise ValueError('This VM is already paired')
-    code = secrets.token_urlsafe(24)
-    siwc.private_write(storage / 'pairing.json', {
-        'sha256': hashlib.sha256(code.encode()).hexdigest(), 'expires_at': time.time() + 3600,
-    })
-    return code
+            try:
+                self._release()
+            except OSError:
+                raise HTTPException(503, 'The VM browser could not be cleared') from None
 
 
 def create_app(gateway: Gateway) -> FastAPI:
@@ -223,28 +260,10 @@ def create_app(gateway: Gateway) -> FastAPI:
     async def health():
         return {'status': 'ok'}
 
-    @app.post('/v1/pair')
-    async def pair(body: PairBody, user_id: str = Depends(user)):
-        with gateway.lock:
-            existing = gateway.owner()
-            if existing:
-                if existing != user_id:
-                    raise HTTPException(403, 'This VM is linked to another account')
-                return gateway.connection()
-            record = siwc.private_read(gateway.storage / 'pairing.json')
-            if not record or time.time() >= record['expires_at'] or not hmac.compare_digest(
-                    record['sha256'], hashlib.sha256(body.code.encode()).hexdigest()):
-                raise HTTPException(403, 'Invalid or expired pairing code')
-            siwc.private_write(gateway.storage / 'owner.json', {'user_id': user_id})
-            (gateway.storage / 'pairing.json').unlink(missing_ok=True)
-            return gateway.connection()
-
     @app.get('/v1/connection')
     async def connection(user_id: str = Depends(user)):
-        linked = gateway.owner()
-        if linked and linked != user_id:
-            raise HTTPException(403, 'This VM is linked to another account')
-        return gateway.connection()
+        with gateway.lock:
+            return gateway.connection(user_id)
 
     @app.post('/v1/handoff')
     async def issue_handoff(user_id: str = Depends(owner)):
@@ -255,9 +274,18 @@ def create_app(gateway: Gateway) -> FastAPI:
                              x_fitcoach_handoff_key: str = Header(default='')):
         return gateway.redeem_handoff(user_id, body.code, x_fitcoach_handoff_key)
 
+    @app.post('/v1/handoff/confirm', status_code=204)
+    async def confirm_handoff(user_id: str = Depends(owner),
+                              x_fitcoach_handoff_key: str = Header(default='')):
+        configured = os.environ.get('FITCOACH_VM_HANDOFF_KEY', '')
+        if len(configured) < 32 or not hmac.compare_digest(x_fitcoach_handoff_key, configured):
+            raise HTTPException(403, 'Handoff service authentication failed')
+        gateway.stop()
+        return Response(status_code=204)
+
     @app.post('/v1/attempts')
-    async def start(_: str = Depends(owner)):
-        return gateway.start()
+    async def start(user_id: str = Depends(user)):
+        return gateway.start(user_id)
 
     @app.get('/v1/attempts/{attempt_id}')
     async def attempt(attempt_id: str, _: str = Depends(owner)):
@@ -265,34 +293,11 @@ def create_app(gateway: Gateway) -> FastAPI:
             current = gateway.attempt
             if not current or current['id'] != attempt_id:
                 raise HTTPException(404, 'Attempt not found')
-            return {'id': attempt_id, 'state': current['state'], 'connection': gateway.connection()}
+            return {'id': attempt_id, 'state': current['state'], 'connection': gateway.connection(_)}
 
     @app.delete('/v1/connection', status_code=204)
     async def disconnect(_: str = Depends(owner)):
         gateway.stop()
-        return Response(status_code=204)
-
-    @app.get('/v1/launch/{ticket}')
-    async def launch(ticket: str):
-        with gateway.lock:
-            entry = gateway.tickets.pop(ticket, None)
-            if (not entry or time.time() > entry[1] or not gateway.attempt or
-                    entry[0] != gateway.attempt['id'] or gateway.attempt['state'] != 'pending'):
-                raise HTTPException(404, 'Launch link expired')
-            session = secrets.token_urlsafe(32)
-            gateway.sessions[session] = time.time() + 600
-        response = RedirectResponse('/browser/vnc.html?autoconnect=1&path=browser/websockify', status_code=303)
-        response.set_cookie('fitcoach_vm_browser', session, max_age=600, path='/browser',
-                            secure=True, httponly=True, samesite='lax')
-        return response
-
-    @app.get('/v1/browser-auth')
-    async def browser_auth(request: Request):
-        token = request.cookies.get('fitcoach_vm_browser', '')
-        with gateway.lock:
-            expires = gateway.sessions.get(token)
-            if not expires or time.time() >= expires:
-                raise HTTPException(401, 'Browser session expired')
         return Response(status_code=204)
 
     @app.websocket('/v1/viewer')
@@ -319,6 +324,10 @@ def create_app(gateway: Gateway) -> FastAPI:
 
         async def to_browser():
             while data := await reader.read(65536):
+                with gateway.lock:
+                    if (gateway.viewers.get(token) != entry or gateway.attempt is None or
+                            gateway.attempt['id'] != entry[0] or gateway.attempt['state'] != 'pending'):
+                        return
                 await websocket.send_bytes(data)
 
         async def to_vm():
@@ -326,12 +335,22 @@ def create_app(gateway: Gateway) -> FastAPI:
                 message = await websocket.receive()
                 if message['type'] == 'websocket.disconnect':
                     return
+                with gateway.lock:
+                    if (gateway.viewers.get(token) != entry or gateway.attempt is None or
+                            gateway.attempt['id'] != entry[0] or gateway.attempt['state'] != 'pending'):
+                        return
                 if message.get('bytes') is not None:
                     writer.write(message['bytes'])
                     await writer.drain()
 
         async def expire():
-            await asyncio.sleep(max(0, entry[1] - time.time()))
+            while True:
+                with gateway.lock:
+                    if (gateway.viewers.get(token) != entry or gateway.attempt is None or
+                            gateway.attempt['id'] != entry[0] or gateway.attempt['state'] != 'pending' or
+                            time.time() >= entry[1]):
+                        return
+                await asyncio.sleep(0.25)
 
         tasks = [asyncio.create_task(to_browser()), asyncio.create_task(to_vm()),
                  asyncio.create_task(expire())]
@@ -359,13 +378,10 @@ def main() -> None:
     import argparse
     import uvicorn
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['serve', 'pair-code'])
+    parser.add_argument('action', choices=['serve'])
     parser.add_argument('--storage', type=Path,
                         default=Path.home() / '.config' / 'fitcoach-siwc-prototype')
     args = parser.parse_args()
-    if args.action == 'pair-code':
-        print(create_pair_code(args.storage))
-        return
     gateway = Gateway(args.storage, os.environ['FITCOACH_VM_SUPABASE_URL'],
                       os.environ['FITCOACH_VM_SUPABASE_KEY'],
                       os.environ['FITCOACH_VM_PUBLIC_ORIGIN'], os.environ['FITCOACH_VM_PWA_ORIGIN'])

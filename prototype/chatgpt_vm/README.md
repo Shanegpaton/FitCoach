@@ -1,6 +1,6 @@
 # VM browser sign-in proof
 
-This single-account prototype connects the FitCoachGPT PWA directly to one VM for ChatGPT sign-in. It does not make model requests. OAuth runs **inside the VM whose browser the iPhone user controls**. Opening the authorization URL in iPhone Safari would direct `127.0.0.1` to the phone and cannot complete this flow.
+This prototype gives one FitCoach account at a time an exclusive five-minute session on a shared VM. The authenticated API controls the VM; the PWA connects only to its protected viewer relay. OAuth runs **inside the VM whose browser the iPhone user controls**. Opening the authorization URL in iPhone Safari would direct `127.0.0.1` to the phone and cannot complete this flow.
 
 ## Run on a disposable VM
 
@@ -33,44 +33,32 @@ cannot start under that restriction. The sign-in process uses
 `/usr/bin/firefox-esr`; an alternative path can be set with
 `FITCOACH_VM_FIREFOX`.
 The browser launcher opens Firefox with a dedicated profile at
-`/var/lib/fitcoach-browser/.local/share/fitcoach-firefox-profile`. Keep that profile across VM
-restarts. The VNC startup script starts only Openbox; Firefox opens when a
+`/var/lib/fitcoach-browser/.local/share/fitcoach-firefox-profile`. The launcher removes that profile before each account's session and after confirmed credential storage. The VNC startup script starts only Openbox; Firefox opens when a
 connection attempt starts. A fresh profile avoids Firefox's startup recovery
 dialog, which can otherwise leave the remote desktop apparently blank.
 The VNC display accepts connections only from VM loopback; the public viewer
 requires an attempt-specific token and an exact allowed PWA origin. The gateway
 service binds to `127.0.0.1:8787`; [Caddyfile.example](Caddyfile.example) is the
-HTTPS reverse proxy. Its older `/browser/*` route remains protected for previous
-PWA deployments. Only ports 80 and 443 need external access. The
+HTTPS reverse proxy. Remove any older `/browser/*` proxy route when upgrading;
+the authenticated `/v1/viewer` relay is the only supported browser path. Only ports 80 and 443 need external access. The
 installed but logged-out Tailscale client is not part of this route.
 
 Set `VITE_CHATGPT_VM_URL` to the VM's HTTPS origin when building the PWA. On the VM,
 put `FITCOACH_VM_SUPABASE_URL`, `FITCOACH_VM_SUPABASE_KEY` (the public anon key),
 `FITCOACH_VM_PWA_ORIGIN`, and `FITCOACH_VM_PUBLIC_ORIGIN` in an owner-protected
 `/etc/fitcoach-vm.env`. The gateway verifies each PWA bearer token with Supabase
-Auth and binds this VM to the first account that submits a one-hour pairing code.
+Auth and reserves the VM for the verified account for five minutes.
 `FITCOACH_VM_PWA_ORIGIN` accepts a comma-separated list of exact HTTPS origins
 when an existing PWA installation still uses an older deployment address.
-Generate that code on the VM with:
-
-```bash
-cd /opt/fitcoach-vm
-sudo -u fitcoach-auth HOME=/var/lib/fitcoach-auth .venv/bin/python -m prototype.chatgpt_vm.gateway pair-code --storage /var/lib/fitcoach-auth/state
-```
-
-Enter the code once in Settings. Then **Connect ChatGPT** creates a short-lived
-attempt and shows the VM browser inside the PWA. The PWA polls for the result. After sign-in,
-it receives a short-lived, one-use handoff code and submits that code to the authenticated
-training API. The API redeems the code directly with the VM, encrypts the OpenAI credential
+**Connect ChatGPT** asks the API to start an exclusive attempt and shows the VM browser inside the PWA. The PWA polls the API for the result. After sign-in,
+the API obtains and redeems a short-lived, one-use handoff code directly with the VM, encrypts the OpenAI credential
 record, and stores it in the account-scoped Supabase PostgreSQL database. The PWA receives only
 connection status. Set `FITCOACH_VM_HANDOFF_KEY` in `/etc/fitcoach-vm.env` to the same 32-byte
-base64url value as the API project's `FITCOACH_CHATGPT_SECRET`. Keep the VM running until Settings
-confirms that the connection is saved in the backend. A second FitCoach user receives 403 from
-this VM. The viewer token is held only in PWA memory and is valid for ten minutes.
-Older deployments may still use a one-use launch link.
+base64url value as the API project's `FITCOACH_CHATGPT_SECRET`. After the database commit, the API confirms the handoff so the VM removes its credential file and browser profile, then releases the session. Keep the VM running until Settings confirms that cleanup completed. A second FitCoach user receives a busy response while the lease is active. The viewer token is held only in PWA memory and is valid for five minutes.
+An older permanent `owner.json` is released automatically if it has no credentials. If it still has credentials, sign in as that FitCoach account and save them to the backend before other accounts use the VM; the gateway preserves that record until handoff confirmation.
 The training API and account sync remain separate.
 
-From the iPhone, control the **VM browser** and finish OpenAI consent. The protected OAuth process waits five minutes for a one-use `http://127.0.0.1:<port>/auth/callback` request. It then exchanges the code with the issued client ID and verifies the signed ID token through OpenAI’s JWKS. Tokens and the stable opaque host ID stay in the protected state directory. The browser receives the OpenAI page and callback response, never the token JSON. Do not capture the authorization URL, browser session, terminal output, or credential files in diagnostics. The browser is still a full desktop, so this prototype should serve only its single paired account.
+From the iPhone, control the **VM browser** and finish OpenAI consent. The protected OAuth process waits five minutes for a one-use `http://127.0.0.1:<port>/auth/callback` request. It then exchanges the code with the issued client ID and verifies the signed ID token through OpenAI’s JWKS. Tokens and the stable opaque host ID stay in the protected state directory. The browser receives the OpenAI page and callback response, never the token JSON. Do not capture the authorization URL, browser session, terminal output, or credential files in diagnostics. The VM serves accounts sequentially; it does not isolate simultaneous Firefox desktops.
 
 ```bash
 sudo -u fitcoach-auth HOME=/var/lib/fitcoach-auth .venv/bin/python -m prototype.chatgpt_vm.siwc status --storage /var/lib/fitcoach-auth/state

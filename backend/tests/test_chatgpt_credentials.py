@@ -48,9 +48,12 @@ async def test_handoff_stores_only_for_verified_account(api, monkeypatch):
     real_client = httpx.AsyncClient
 
     def vm_response(request):
-        assert str(request.url) == 'https://vm.example/v1/handoff/redeem'
+        assert str(request.url) in ('https://vm.example/v1/handoff/redeem',
+                                    'https://vm.example/v1/handoff/confirm')
         assert request.headers['X-FitCoach-Handoff-Key'] == secret
         assert request.headers['Authorization'] == 'Bearer a'
+        if str(request.url).endswith('/confirm'):
+            return httpx.Response(204)
         return httpx.Response(200, json=record(str(users['a'])))
 
     monkeypatch.setattr(api_module.httpx, 'AsyncClient',

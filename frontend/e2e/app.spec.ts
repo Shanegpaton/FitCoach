@@ -19,41 +19,28 @@ test.beforeEach(async ({ page, context }) => {
   });
 });
 
-test('VM connection pairs, opens the in-app browser, and reports verified scope', async ({ page, context }) => {
-  let paired = false;
+test('VM connection opens the in-app browser and reports verified scope', async ({ page, context }) => {
   let connected = false;
   let stored = false;
-  const connection = () => ({ paired, connected, email: connected ? 'coach@example.com' : null,
+  const connection = () => ({ paired: connected, busy: false, connected, email: connected ? 'coach@example.com' : null,
     name: connected ? 'Coach' : null, planUsageGranted: connected ? true : null });
   await context.route('https://api.example.com/v1/chatgpt/**', async route => {
     const path = new URL(route.request().url()).pathname;
-    if (path === '/v1/chatgpt/handoff') stored = true;
-    return route.fulfill({ json: stored ? { ...connection(), storedInBackend: true }
-      : { connected: false, email: null, name: null, planUsageGranted: null, storedInBackend: false },
+    if (path === '/v1/chatgpt/vm/save') stored = true;
+    if (path.startsWith('/v1/chatgpt/vm/attempts/')) connected = true;
+    const body = path === '/v1/chatgpt/vm/attempts' ? { id: '00000000-0000-0000-0000-000000000001', state: 'pending', viewerToken: 'test-viewer' }
+      : path.startsWith('/v1/chatgpt/vm/attempts/') ? { id: '00000000-0000-0000-0000-000000000001', state: 'connected', connection: connection() }
+      : stored ? { ...connection(), storedInBackend: true, vmCleanupPending: false }
+      : path === '/v1/chatgpt/vm/connection' ? connection()
+      : { connected: false, email: null, name: null, planUsageGranted: null, storedInBackend: false };
+    return route.fulfill({ json: body,
       headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173',
         'Access-Control-Allow-Headers': 'authorization,content-type',
         'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS' } });
   });
-  await context.route('https://vm.example.com/v1/**', async route => {
-    const request = route.request();
-    const path = new URL(request.url()).pathname;
-    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173',
-      'Access-Control-Allow-Headers': 'authorization,content-type',
-      'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS' };
-    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
-    if (path === '/v1/pair') paired = true;
-    if (path === '/v1/attempts/test') connected = true;
-    const body = path === '/v1/handoff' ? { code: 'a'.repeat(64) }
-      : path === '/v1/attempts' ? { id: 'test', state: 'pending', viewerToken: 'test-viewer' }
-      : path === '/v1/attempts/test' ? { id: 'test', state: 'connected', connection: connection() }
-        : connection();
-    return route.fulfill({ json: body, headers });
-  });
   await openApp(page);
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'ChatGPT connection' })).toBeVisible();
-  await page.getByLabel('VM pairing code').fill('a'.repeat(24));
-  await page.getByRole('button', { name: 'Pair VM' }).click();
   await expect(page.getByRole('button', { name: 'Connect ChatGPT' })).toBeVisible();
   await page.getByRole('button', { name: 'Connect ChatGPT' }).click();
   await expect(page.getByRole('dialog', { name: 'ChatGPT sign-in' })).toBeVisible();
@@ -61,7 +48,7 @@ test('VM connection pairs, opens the in-app browser, and reports verified scope'
   await expect(page.getByLabel('Tap a field on OpenAI’s page, then type here with your phone keyboard.')).toBeVisible();
   await expect(page.getByText('Connected to Coach.')).toBeVisible();
   await expect(page.getByText('ChatGPT plan usage: Granted at sign-in')).toBeVisible();
-  await expect(page.getByText('Connection saved in the backend. You can stop the VM.')).toBeVisible();
+  await expect(page.getByText('Connection saved in the backend. The VM session has been cleared.')).toBeVisible();
 });
 
 async function openApp(page: Page) {

@@ -2,7 +2,7 @@
 
 ## ChatGPT connection experiment
 
-Settings contains an experimental [ChatGPT VM connection](prototype/chatgpt_vm/README.md) for one FitCoach account. The PWA verifies its Supabase sign-in with the VM, opens a protected VM browser, and shows the verified ChatGPT account and whether plan usage was granted. After sign-in, a one-use server-to-server handoff stores encrypted credentials in the account-scoped Supabase PostgreSQL backend, so the VM can be stopped. The PWA receives only connection status. With granted plan usage, Coach sends online requests through the authenticated API; the API refreshes tokens and calls the Responses API. Offline or disconnected Coach uses labeled sample responses. OpenAI eligibility for FitCoachGPT-operated VMs needs confirmation before broader release.
+Settings contains an experimental [ChatGPT VM connection](prototype/chatgpt_vm/README.md). The authenticated API starts a five-minute exclusive VM session for a FitCoach account; no operator pairing code is needed. The PWA controls the protected VM browser and shows the verified ChatGPT account and whether plan usage was granted. After sign-in, the API retrieves a one-use handoff, stores encrypted credentials in the account-scoped Supabase PostgreSQL backend, and asks the VM to delete its temporary credentials and Firefox profile. The PWA receives only connection status and a short-lived viewer token. With granted plan usage, Coach sends online requests through the authenticated API; the API refreshes tokens and calls the Responses API. Offline or disconnected Coach uses labeled sample responses. OpenAI eligibility for FitCoachGPT-operated VMs needs confirmation before broader release.
 
 FitCoachGPT is a phone-first workout planner and tracker. Build a routine, log your sets, and see your progress in a dark, installable Progressive Web App (PWA).
 
@@ -96,14 +96,14 @@ Browser tests use installed Google Chrome for desktop and Android-sized emulatio
 
 ### ChatGPT connection prototype
 
-Settings can pair one FitCoach account to the Oracle VM and display its Firefox
+Settings can reserve the Oracle VM for one FitCoach account at a time and display its Firefox
 sign-in browser inside the PWA. The user completes OpenAI sign-in and permission
 review in that view. On phones, tap the OpenAI field in the remote view, then
 use the keyboard relay below it to type and send Enter, Tab, or Backspace. The
 relay clears its input after each keystroke; the OAuth callback completes on the VM. A one-use
-handoff moves verified credentials to the encrypted backend store. The PWA receives only
-connection status and a short-lived viewer token. Coach still uses
-sample responses and makes no model requests. Set `VITE_CHATGPT_VM_URL` to the
+handoff moves verified credentials to the encrypted backend store. The backend then clears
+the VM session. The PWA receives only connection status and a short-lived viewer token.
+Set `VITE_CHATGPT_VM_URL` to the
 VM's HTTPS origin in the frontend deployment. See
 [the VM prototype guide](prototype/chatgpt_vm/README.md) for service setup and
 release gates.
