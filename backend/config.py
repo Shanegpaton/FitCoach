@@ -39,9 +39,7 @@ class Settings:
             database_url=os.environ['FITCOACH_DATABASE_URL'],
             supabase_url=os.environ['FITCOACH_SUPABASE_URL'].rstrip('/'),
             supabase_key=os.environ['FITCOACH_SUPABASE_KEY'],
-            # A function instance keeps its own pool; use one connection by default
-            # on Vercel so scaling does not reserve five connections per instance.
-            pool_size=int(os.getenv('FITCOACH_POOL_SIZE', '1' if os.getenv('VERCEL') else '5')),
+            pool_size=int(os.getenv('FITCOACH_POOL_SIZE', '3' if os.getenv('VERCEL') else '5')),
             pool_timeout=int(os.getenv('FITCOACH_POOL_TIMEOUT', '10')),
             cors_origins=tuple(x.strip() for x in os.getenv('FITCOACH_CORS_ORIGINS', '').split(',') if x.strip()),
             allow_local_plaintext=os.getenv('FITCOACH_ALLOW_LOCAL_PLAINTEXT', 'false').lower() == 'true',
