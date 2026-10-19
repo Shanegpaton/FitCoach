@@ -14,6 +14,7 @@ export interface ChatGPTAttempt {
   id: string;
   state: 'pending' | 'connected' | 'declined' | 'failed' | 'expired';
   launchUrl?: string;
+  viewerToken?: string;
   connection?: ChatGPTConnection;
 }
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import asyncio
 import os
 from pathlib import Path
 import secrets
@@ -18,7 +19,7 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -54,6 +55,7 @@ class Gateway:
         self.attempt: dict | None = None
         self.tickets: dict[str, tuple[str, float]] = {}
         self.sessions: dict[str, float] = {}
+        self.viewers: dict[str, tuple[str, float]] = {}
 
     async def verify_user(self, authorization: str) -> str:
         parts = authorization.split()
@@ -120,9 +122,12 @@ class Gateway:
             self.attempt = {'id': attempt_id, 'state': 'pending', 'started': time.time(),
                             'process': process, 'before': before, 'cancelled': False}
             self.tickets[ticket] = (attempt_id, time.time() + 120)
+            viewer = secrets.token_urlsafe(32)
+            self.viewers[viewer] = (attempt_id, time.time() + 600)
             threading.Thread(target=self._watch, args=(attempt_id,), daemon=True).start()
             return {'id': attempt_id, 'state': 'pending',
-                    'launchUrl': f'{self.public_origin}/v1/launch/{ticket}'}
+                    'launchUrl': f'{self.public_origin}/v1/launch/{ticket}',
+                    'viewerToken': viewer}
 
     def _watch(self, attempt_id: str) -> None:
         with self.lock:
@@ -164,6 +169,7 @@ class Gateway:
             siwc.disconnect(self.storage)
             self.tickets.clear()
             self.sessions.clear()
+            self.viewers.clear()
 
 
 def create_pair_code(storage: Path) -> str:
@@ -255,6 +261,60 @@ def create_app(gateway: Gateway) -> FastAPI:
             if not expires or time.time() >= expires:
                 raise HTTPException(401, 'Browser session expired')
         return Response(status_code=204)
+
+    @app.websocket('/v1/viewer')
+    async def viewer(websocket: WebSocket):
+        origin = websocket.headers.get('origin', '')
+        protocols = websocket.scope.get('subprotocols', [])
+        token = next((p.removeprefix('fitcoach.') for p in protocols
+                      if p.startswith('fitcoach.')), '')
+        with gateway.lock:
+            entry = gateway.viewers.get(token)
+            allowed = (origin in gateway.pwa_origins and entry is not None and
+                       time.time() < entry[1] and gateway.attempt is not None and
+                       gateway.attempt['id'] == entry[0] and
+                       gateway.attempt['state'] == 'pending')
+        if not allowed:
+            await websocket.close(code=1008)
+            return
+        try:
+            reader, writer = await asyncio.open_connection('127.0.0.1', 5901)
+        except OSError:
+            await websocket.close(code=1011)
+            return
+        await websocket.accept()
+
+        async def to_browser():
+            while data := await reader.read(65536):
+                await websocket.send_bytes(data)
+
+        async def to_vm():
+            while True:
+                message = await websocket.receive()
+                if message['type'] == 'websocket.disconnect':
+                    return
+                if message.get('bytes') is not None:
+                    writer.write(message['bytes'])
+                    await writer.drain()
+
+        async def expire():
+            await asyncio.sleep(max(0, entry[1] - time.time()))
+
+        tasks = [asyncio.create_task(to_browser()), asyncio.create_task(to_vm()),
+                 asyncio.create_task(expire())]
+        try:
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
+        finally:
+            for task in tasks:
+                task.cancel()
+            writer.close()
+            await writer.wait_closed()
+            try:
+                await websocket.close()
+            except RuntimeError:
+                pass
 
     return app
 

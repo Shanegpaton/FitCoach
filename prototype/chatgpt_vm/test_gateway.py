@@ -2,6 +2,7 @@ import threading
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 import pytest
 
 from prototype.chatgpt_vm import gateway, siwc
@@ -102,6 +103,40 @@ def test_finished_attempt_cannot_open_browser(setup):
         threading.Event().wait(0.01)
     assert status['state'] == 'declined'
     assert client.get(attempt['launchUrl'].removeprefix('https://vm.example')).status_code == 404
+
+
+def test_embedded_viewer_requires_attempt_token_and_app_origin(setup, monkeypatch):
+    vm, client, process, _, _ = setup
+    code = gateway.create_pair_code(vm.storage)
+    client.post('/v1/pair', headers=auth(), json={'code': code})
+    attempt = client.post('/v1/attempts', headers=auth()).json()
+    protocol = f"fitcoach.{attempt['viewerToken']}"
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect('/v1/viewer', headers={'origin': 'https://other.example'},
+                                      subprotocols=[protocol]):
+            pass
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect('/v1/viewer', headers={'origin': 'https://app.example'},
+                                      subprotocols=['fitcoach.invalid']):
+            pass
+
+    class Reader:
+        async def read(self, _):
+            return b'RFB 003.008\n'
+
+    class Writer:
+        def close(self): pass
+        async def wait_closed(self): pass
+
+    async def fake_open(*_):
+        return Reader(), Writer()
+
+    monkeypatch.setattr(gateway.asyncio, 'open_connection', fake_open)
+    with client.websocket_connect('/v1/viewer', headers={'origin': 'https://app.example'},
+                                  subprotocols=[protocol]) as ws:
+        assert ws.receive_bytes() == b'RFB 003.008\n'
+    process.done.set()
 
 
 def test_attempt_success_and_disconnect_cancel(setup, monkeypatch):

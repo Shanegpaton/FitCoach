@@ -344,6 +344,14 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 .file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; padding: 0; }
 .file-button:focus-within { outline: 2px solid var(--accent); outline-offset: 3px; }
 .settings-card > p { font-size: 11px; color: #aab69b; }
+.chatgpt-viewer { position: fixed; z-index: 110; inset: 0; background: #11150f; display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+.chatgpt-viewer-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid #38452d; }
+.chatgpt-viewer-header > div { display: grid; gap: 3px; }
+.chatgpt-viewer-header strong { font-size: 16px; }
+.chatgpt-viewer-header span, .chatgpt-viewer-status { color: #b9c6aa; font-size: 12px; }
+.chatgpt-viewer-status { margin: 0; padding: 8px 16px; }
+.chatgpt-viewer-screen { flex: 1; min-height: 0; overflow: hidden; background: #222; touch-action: none; }
+.chatgpt-viewer-screen canvas { max-width: none; }
 .install-steps { margin-top: 24px; }
 .install-steps > div { display: flex; gap: 14px; margin: 18px 0; }
 .install-steps span { font-size: 10px; color: var(--accent); padding-top: 4px; }

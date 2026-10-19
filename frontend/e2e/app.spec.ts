@@ -19,7 +19,7 @@ test.beforeEach(async ({ page, context }) => {
   });
 });
 
-test('VM connection pairs, opens the browser, and reports verified scope', async ({ page, context }) => {
+test('VM connection pairs, opens the in-app browser, and reports verified scope', async ({ page, context }) => {
   let paired = false;
   let connected = false;
   const connection = () => ({ paired, connected, email: connected ? 'coach@example.com' : null,
@@ -31,10 +31,9 @@ test('VM connection pairs, opens the browser, and reports verified scope', async
       'Access-Control-Allow-Headers': 'authorization,content-type',
       'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS' };
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
-    if (path === '/v1/launch/test') return route.fulfill({ body: '<h1>VM browser</h1>', contentType: 'text/html' });
     if (path === '/v1/pair') paired = true;
     if (path === '/v1/attempts/test') connected = true;
-    const body = path === '/v1/attempts' ? { id: 'test', state: 'pending', launchUrl: 'https://vm.example.com/v1/launch/test' }
+    const body = path === '/v1/attempts' ? { id: 'test', state: 'pending', viewerToken: 'test-viewer' }
       : path === '/v1/attempts/test' ? { id: 'test', state: 'connected', connection: connection() }
         : connection();
     return route.fulfill({ json: body, headers });
@@ -45,9 +44,9 @@ test('VM connection pairs, opens the browser, and reports verified scope', async
   await page.getByLabel('VM pairing code').fill('a'.repeat(24));
   await page.getByRole('button', { name: 'Pair VM' }).click();
   await expect(page.getByRole('button', { name: 'Connect ChatGPT' })).toBeVisible();
-  const popup = page.waitForEvent('popup');
   await page.getByRole('button', { name: 'Connect ChatGPT' }).click();
-  await expect((await popup).getByRole('heading', { name: 'VM browser' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'ChatGPT sign-in' })).toBeVisible();
+  await expect(page.getByLabel('Interactive OpenAI sign-in browser')).toBeVisible();
   await expect(page.getByText('Connected to Coach.')).toBeVisible();
   await expect(page.getByText('ChatGPT plan usage: Granted at sign-in')).toBeVisible();
 });

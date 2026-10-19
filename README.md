@@ -94,6 +94,17 @@ VITE_FITCOACH_API_URL=https://YOUR_API_HOST npm run test:e2e
 
 Browser tests use installed Google Chrome for desktop and Android-sized emulation, plus Playwright WebKit for iPhone-sized emulation. They cover onboarding, offline logging and reload recovery, proposals, supersets, timers, custom exercises, real history, and backups. Physical iOS/Android installation and device alert behavior should also be checked before release.
 
+### ChatGPT connection prototype
+
+Settings can pair one FitCoach account to the Oracle VM and display its Firefox
+sign-in browser inside the PWA. The user completes OpenAI sign-in and permission
+review in that view; the OAuth callback and tokens remain on the VM. The PWA
+receives only connection status and a short-lived viewer token. Coach still uses
+sample responses and makes no model requests. Set `VITE_CHATGPT_VM_URL` to the
+VM's HTTPS origin in the frontend deployment. See
+[the VM prototype guide](prototype/chatgpt_vm/README.md) for service setup and
+release gates.
+
 ## Relational training API
 
 The independent `backend/` application uses FastAPI, SQLAlchemy 2, Psycopg 3 and Alembic with Supabase PostgreSQL. It verifies Supabase Auth bearer tokens and provides profiles, owned exercises, a shared exercise catalog, nested plans and session snapshots, and schedule overrides. A private schema, forced row-level security, ownership foreign keys, transactional writes, soft deletion and ETag preconditions protect account data and workout history.

@@ -3,6 +3,7 @@ import { Link2, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
 import { useAuth } from '../auth';
 import { chatgptVmUrl, vmRequest, type ChatGPTAttempt, type ChatGPTConnection as Connection } from '../chatgptVm';
 import { SectionTitle } from '../ui';
+import { ChatGPTViewer } from './ChatGPTViewer';
 
 export function ChatGPTConnection() {
   const { userId, session, offlineAccess } = useAuth();
@@ -11,6 +12,7 @@ export function ChatGPTConnection() {
   const [pairCode, setPairCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [viewerOpen, setViewerOpen] = useState(false);
   const available = Boolean(chatgptVmUrl && userId && session && !offlineAccess);
 
   const reload = useCallback(async () => {
@@ -18,7 +20,7 @@ export function ChatGPTConnection() {
   }, [userId]);
 
   useEffect(() => {
-    setConnection(null); setAttempt(null); setError('');
+    setConnection(null); setAttempt(null); setError(''); setViewerOpen(false);
     if (available) void reload().catch(e => setError(e instanceof Error ? e.message : 'VM unavailable.'));
   }, [available, reload, userId]);
 
@@ -29,7 +31,8 @@ export function ChatGPTConnection() {
       try {
         const next = await vmRequest<ChatGPTAttempt>(userId, `/v1/attempts/${attempt.id}`);
         if (!active) return;
-        setAttempt(current => ({ ...next, launchUrl: current?.launchUrl }));
+        setAttempt(current => ({ ...next, viewerToken: current?.viewerToken }));
+        if (next.state !== 'pending') setViewerOpen(false);
         if (next.state !== 'pending') setConnection(next.connection ?? null);
       } catch (e) { if (active) setError(e instanceof Error ? e.message : 'Could not check sign-in.'); }
     };
@@ -52,15 +55,13 @@ export function ChatGPTConnection() {
 
   const connect = async () => {
     if (!userId || busy) return;
-    const windowForVm = window.open('about:blank', '_blank');
     setBusy(true); setError('');
     try {
       const next = await vmRequest<ChatGPTAttempt>(userId, '/v1/attempts', { method: 'POST' });
       setAttempt(next);
-      if (windowForVm && next.launchUrl) windowForVm.location.replace(next.launchUrl);
-      else setError('Your browser blocked the VM window. Open it using the link below.');
+      if (next.viewerToken) setViewerOpen(true);
+      else setError('The VM did not provide a browser session. Try again.');
     } catch (e) {
-      windowForVm?.close();
       setError(e instanceof Error ? e.message : 'Could not start ChatGPT sign-in.');
     } finally { setBusy(false); }
   };
@@ -70,25 +71,26 @@ export function ChatGPTConnection() {
     setBusy(true); setError('');
     try {
       await vmRequest<void>(userId, '/v1/connection', { method: 'DELETE' });
-      setAttempt(null); await reload();
+      setAttempt(null); setViewerOpen(false); await reload();
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not disconnect.'); }
     finally { setBusy(false); }
   };
 
   return <section className="settings-card"><SectionTitle title="ChatGPT connection"><Link2 size={20} /></SectionTitle>
-    <p>Connect your ChatGPT account in the VM browser. Your ChatGPT credentials stay on the VM. Coach still uses sample responses.</p>
+    <p>Sign in on OpenAI’s page in the browser view below. The browser and ChatGPT credentials stay on the VM. Coach still uses sample responses.</p>
     {!chatgptVmUrl ? <p className="field-hint">The VM connection is not configured for this app deployment yet.</p>
       : !available ? <p className="field-hint">Sign in to FitCoachGPT while online to connect ChatGPT.</p>
         : connection === null ? <p aria-live="polite">Checking VM connection…</p>
           : !connection.paired ? <form onSubmit={e => void pair(e)}><label>VM pairing code<input autoComplete="off" value={pairCode} onChange={e => setPairCode(e.target.value)} required minLength={20} /></label><p className="field-hint">Enter the one-time pairing code from the VM operator. This binds this VM to your FitCoach account.</p><button className="button secondary" disabled={busy} type="submit">Pair VM</button></form>
             : <><div className="privacy-note"><ShieldCheck size={20} /><p>{connection.connected ? `Connected to ${connection.name || connection.email || 'your verified ChatGPT account'}.` : 'No ChatGPT account connected yet.'}</p></div>
               {connection.connected && <p aria-live="polite">ChatGPT plan usage: {connection.planUsageGranted ? 'Granted at sign-in' : 'Not granted'}</p>}
-              {attempt?.state === 'pending' && <p aria-live="polite">Complete sign-in and permission review in the VM browser. This page will update when it finishes.</p>}
-              {attempt?.state === 'pending' && attempt.launchUrl && <a className="button secondary" href={attempt.launchUrl} target="_blank" rel="noreferrer">Open VM browser</a>}
+              {attempt?.state === 'pending' && <p aria-live="polite">Complete sign-in and permission review on OpenAI’s page. This page will update when it finishes.</p>}
+              {attempt?.state === 'pending' && attempt.viewerToken && !viewerOpen && <button className="button secondary" onClick={() => setViewerOpen(true)}>Resume sign-in</button>}
               {attempt && attempt.state !== 'pending' && attempt.state !== 'connected' && <p aria-live="polite">Sign-in {attempt.state}. You can try again.</p>}
               <div className="action-row"><button className="button secondary" disabled={busy || attempt?.state === 'pending'} onClick={() => void connect()}><RefreshCw size={16} />{connection.connected ? 'Reconnect' : 'Connect ChatGPT'}</button>
                 {connection.connected && <button className="button secondary" disabled={busy} onClick={() => void disconnect()}><Unplug size={16} />Disconnect</button>}
               </div></>}
     {error && <p className="field-hint" aria-live="polite">{error}</p>}
+    {viewerOpen && attempt?.state === 'pending' && attempt.viewerToken && <ChatGPTViewer token={attempt.viewerToken} onClose={() => setViewerOpen(false)} />}
   </section>;
 }

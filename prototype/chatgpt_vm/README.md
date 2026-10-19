@@ -9,8 +9,8 @@ Install a graphical browser and provide an authenticated HTTPS remote browser se
 For the current Oracle Ubuntu prototype, the Python dependencies and tests are in
 `~/fitcoach-prototype` on the VM. A Firefox desktop is served by TigerVNC on
 `127.0.0.1:5901` and noVNC on `127.0.0.1:6080`; neither port should be opened in
-the VCN security list. Caddy exposes the desktop only through the gateway's
-authenticated HTTPS browser route. Open TCP 80 and 443 in the Oracle VCN security
+the VCN security list. The PWA embeds a noVNC client and connects to the gateway's
+authenticated WebSocket relay at `/v1/viewer`. Open TCP 80 and 443 in the Oracle VCN security
 list and host firewall, then start Caddy so it can obtain a trusted certificate.
 Do not expose the raw noVNC endpoint. The VM is an E5 paid shape, so stop it when the prototype is
 idle and account for persistent boot-volume charges.
@@ -24,11 +24,11 @@ The sign-in command launches Firefox with a dedicated owner-only profile at
 restarts. The VNC startup script starts only Openbox; Firefox opens when a
 connection attempt starts. A fresh profile avoids Firefox's startup recovery
 dialog, which can otherwise leave the remote desktop apparently blank.
-The VNC display accepts connections only from VM loopback; the public browser
-route is protected by the gateway's short-lived session. The gateway
+The VNC display accepts connections only from VM loopback; the public viewer
+requires an attempt-specific token and an exact allowed PWA origin. The gateway
 service binds to `127.0.0.1:8787`; [Caddyfile.example](Caddyfile.example) is the
-HTTPS reverse proxy. It requires a short-lived browser session before forwarding
-any noVNC page or WebSocket. Only ports 80 and 443 need external access. The
+HTTPS reverse proxy. Its older `/browser/*` route remains protected for previous
+PWA deployments. Only ports 80 and 443 need external access. The
 installed but logged-out Tailscale client is not part of this route.
 
 Set `VITE_CHATGPT_VM_URL` to the VM's HTTPS origin when building the PWA. On the VM,
@@ -46,9 +46,10 @@ cd ~/fitcoach-prototype
 ```
 
 Enter the code once in Settings. Then **Connect ChatGPT** creates a short-lived
-attempt and opens the VM browser. The PWA polls for the result; it never receives
-an OpenAI code or token. A second FitCoach user receives 403 from this VM. The
-browser session lasts ten minutes and the launch link can be redeemed only once.
+attempt and shows the VM browser inside the PWA. The PWA polls for the result; it
+never receives an OpenAI code or token. A second FitCoach user receives 403 from
+this VM. The viewer token is held only in PWA memory and is valid for ten minutes.
+Older deployments may still use a one-use launch link.
 The training API and account sync remain separate.
 
 ```bash
