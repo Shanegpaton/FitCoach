@@ -38,7 +38,7 @@ def setup(tmp_path):
         raise ValueError('bad token')
 
     vm = gateway.Gateway(tmp_path / 'private', 'https://auth.example', 'anon',
-                         'https://vm.example', 'https://app.example',
+                         'https://vm.example', 'https://app.example,https://old-app.example',
                          verify_user=verify, launch_process=lambda _: process)
     client = TestClient(gateway.create_app(vm), follow_redirects=False)
     return vm, client, process, owner, other
@@ -46,6 +46,22 @@ def setup(tmp_path):
 
 def auth(token='owner'):
     return {'Authorization': f'Bearer {token}'}
+
+
+def test_cors_accepts_configured_app_origins_only(setup):
+    _, client, _, _, _ = setup
+    for origin in ('https://app.example', 'https://old-app.example'):
+        response = client.options('/v1/connection', headers={
+            'Origin': origin, 'Access-Control-Request-Method': 'GET',
+            'Access-Control-Request-Headers': 'authorization',
+        })
+        assert response.status_code == 200
+        assert response.headers['access-control-allow-origin'] == origin
+    response = client.options('/v1/connection', headers={
+        'Origin': 'https://other.example', 'Access-Control-Request-Method': 'GET',
+        'Access-Control-Request-Headers': 'authorization',
+    })
+    assert response.status_code == 400
 
 
 def test_pairing_owner_isolation_and_launch_replay(setup):

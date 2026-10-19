@@ -28,6 +28,8 @@ put `FITCOACH_VM_SUPABASE_URL`, `FITCOACH_VM_SUPABASE_KEY` (the public anon key)
 `FITCOACH_VM_PWA_ORIGIN`, and `FITCOACH_VM_PUBLIC_ORIGIN` in an owner-protected
 `/etc/fitcoach-vm.env`. The gateway verifies each PWA bearer token with Supabase
 Auth and binds this VM to the first account that submits a one-hour pairing code.
+`FITCOACH_VM_PWA_ORIGIN` accepts a comma-separated list of exact HTTPS origins
+when an existing PWA installation still uses an older deployment address.
 Generate that code on the VM with:
 
 ```bash

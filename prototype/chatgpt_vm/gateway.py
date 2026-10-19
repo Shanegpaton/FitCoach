@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import httpx
@@ -33,7 +34,11 @@ class PairBody(BaseModel):
 class Gateway:
     def __init__(self, storage: Path, supabase_url: str, supabase_key: str, public_origin: str,
                  pwa_origin: str, verify_user=None, launch_process=None):
-        if not public_origin.startswith('https://') or not pwa_origin.startswith('https://'):
+        pwa_origins = [origin.strip().rstrip('/') for origin in pwa_origin.split(',') if origin.strip()]
+        if not public_origin.startswith('https://') or not pwa_origins or any(
+                (parsed := urlsplit(origin)).scheme != 'https' or not parsed.netloc or
+                parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password
+                for origin in pwa_origins):
             raise ValueError('Public VM and PWA origins must use HTTPS')
         if not supabase_url.startswith('https://') or not supabase_key:
             raise ValueError('Supabase Auth configuration is required')
@@ -42,7 +47,7 @@ class Gateway:
         self.supabase_url = supabase_url.rstrip('/')
         self.supabase_key = supabase_key
         self.public_origin = public_origin.rstrip('/')
-        self.pwa_origin = pwa_origin.rstrip('/')
+        self.pwa_origins = pwa_origins
         self.verify_user_override = verify_user
         self.launch_process = launch_process or self._launch_process
         self.lock = threading.RLock()
@@ -170,7 +175,7 @@ def create_pair_code(storage: Path) -> str:
 
 def create_app(gateway: Gateway) -> FastAPI:
     app = FastAPI(title='FitCoachGPT VM sign-in prototype', docs_url=None, redoc_url=None)
-    app.add_middleware(CORSMiddleware, allow_origins=[gateway.pwa_origin],
+    app.add_middleware(CORSMiddleware, allow_origins=gateway.pwa_origins,
                        allow_methods=['GET', 'POST', 'DELETE'], allow_headers=['Authorization', 'Content-Type'])
 
     async def user(authorization: str = Header(default='')) -> str:
