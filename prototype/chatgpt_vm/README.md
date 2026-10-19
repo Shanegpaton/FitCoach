@@ -16,6 +16,9 @@ Do not expose the raw noVNC endpoint. The VM is an E5 paid shape, so stop it whe
 idle and account for persistent boot-volume charges.
 The loopback desktop is managed by the two units in [`systemd/`](systemd/):
 `fitcoach-vnc.service` and `fitcoach-novnc.service`. They start after a VM reboot.
+Enable the `ubuntu` user session at boot with `sudo loginctl enable-linger ubuntu`;
+the Snap Firefox launcher needs its `/run/user/<uid>` runtime and D-Bus socket
+when the gateway starts it from a system service.
 The VNC display accepts connections only from VM loopback; the public browser
 route is protected by the gateway's short-lived session. The gateway
 service binds to `127.0.0.1:8787`; [Caddyfile.example](Caddyfile.example) is the
@@ -54,6 +57,9 @@ Launch the command from the VM desktop, or from SSH with the same X display:
 ```bash
 cd ~/fitcoach-prototype
 DISPLAY=:1 XAUTHORITY="$HOME/.Xauthority" \
+XDG_RUNTIME_DIR="/run/user/$(id -u)" \
+DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus" \
+BROWSER=/usr/bin/firefox \
   .venv/bin/python -m prototype.chatgpt_vm.siwc sign-in
 ```
 

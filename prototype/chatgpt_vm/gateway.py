@@ -97,6 +97,10 @@ class Gateway:
         env = os.environ.copy()
         env['DISPLAY'] = ':1'
         env['XAUTHORITY'] = str(Path.home() / '.Xauthority')
+        runtime = Path(f'/run/user/{os.getuid()}')
+        if runtime.is_dir():
+            env['XDG_RUNTIME_DIR'] = str(runtime)
+            env['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path={runtime}/bus'
         env['BROWSER'] = '/usr/bin/firefox'
         return subprocess.Popen([sys.executable, '-m', 'prototype.chatgpt_vm.siwc',
                                  'sign-in', '--storage', str(storage)],
