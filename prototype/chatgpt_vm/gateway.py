@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -103,7 +103,7 @@ class Gateway:
         if runtime.is_dir():
             env['XDG_RUNTIME_DIR'] = str(runtime)
             env['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path={runtime}/bus'
-        env['BROWSER'] = '/usr/bin/firefox'
+        env['BROWSER'] = '/usr/bin/firefox-esr'
         return subprocess.Popen([sys.executable, '-m', 'prototype.chatgpt_vm.siwc',
                                  'sign-in', '--storage', str(storage)],
                                 cwd=Path(__file__).resolve().parents[2], env=env,
@@ -305,7 +305,10 @@ def create_app(gateway: Gateway) -> FastAPI:
         try:
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
-                task.result()
+                try:
+                    task.result()
+                except (OSError, WebSocketDisconnect):
+                    pass  # Closing the in-app viewer interrupts the outgoing VNC stream.
         finally:
             for task in tasks:
                 task.cancel()
@@ -313,7 +316,7 @@ def create_app(gateway: Gateway) -> FastAPI:
             await writer.wait_closed()
             try:
                 await websocket.close()
-            except RuntimeError:
+            except (OSError, RuntimeError, WebSocketDisconnect):
                 pass
 
     return app

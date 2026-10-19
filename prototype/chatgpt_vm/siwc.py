@@ -191,12 +191,13 @@ def listen_for_callback() -> tuple[HTTPServer, threading.Event, dict]:
 
 def open_vm_browser(url: str) -> None:
     profile = Path(os.environ.get('FITCOACH_VM_FIREFOX_PROFILE',
-                                  Path.home() / 'snap/firefox/common/fitcoach-browser-profile'))
+                                  Path.home() / '.local/share/fitcoach-firefox-profile'))
     profile.mkdir(mode=0o700, parents=True, exist_ok=True)
     if profile.is_symlink() or profile.stat().st_mode & 0o077:
         raise SignInError('Firefox profile must be owner-only and cannot be a symlink')
     try:
-        process = subprocess.Popen(['/usr/bin/firefox', '--profile', str(profile),
+        process = subprocess.Popen([os.environ.get('FITCOACH_VM_FIREFOX', '/usr/bin/firefox-esr'),
+                                    '--profile', str(profile),
                                     '--new-window', url], stdin=subprocess.DEVNULL,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    close_fds=True)

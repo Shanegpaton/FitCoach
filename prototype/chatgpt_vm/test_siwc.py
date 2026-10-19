@@ -100,7 +100,7 @@ def test_vm_browser_uses_private_dedicated_profile(tmp_path, monkeypatch):
 
     monkeypatch.setattr(siwc.subprocess, 'Popen', fake_popen)
     siwc.open_vm_browser('https://example.com/sign-in')
-    assert launched['args'] == ['/usr/bin/firefox', '--profile', str(profile),
+    assert launched['args'] == ['/usr/bin/firefox-esr', '--profile', str(profile),
                                 '--new-window', 'https://example.com/sign-in']
     assert stat.S_IMODE(profile.stat().st_mode) == 0o700
     assert launched['kwargs']['stdout'] == siwc.subprocess.DEVNULL

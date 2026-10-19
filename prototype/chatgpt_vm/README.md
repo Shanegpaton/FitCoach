@@ -16,11 +16,13 @@ Do not expose the raw noVNC endpoint. The VM is an E5 paid shape, so stop it whe
 idle and account for persistent boot-volume charges.
 The loopback desktop is managed by the two units in [`systemd/`](systemd/):
 `fitcoach-vnc.service` and `fitcoach-novnc.service`. They start after a VM reboot.
-Enable the `ubuntu` user session at boot with `sudo loginctl enable-linger ubuntu`;
-the Snap Firefox launcher needs its `/run/user/<uid>` runtime and D-Bus socket
-when the gateway starts it from a system service.
+Install Mozilla's signed `firefox-esr` DEB package from its official APT
+repository. The gateway retains `NoNewPrivileges=true`; Ubuntu's Snap Firefox
+cannot start under that restriction. The sign-in process uses
+`/usr/bin/firefox-esr`; an alternative path can be set with
+`FITCOACH_VM_FIREFOX`.
 The sign-in command launches Firefox with a dedicated owner-only profile at
-`~/snap/firefox/common/fitcoach-browser-profile`. Keep that profile across VM
+`~/.local/share/fitcoach-firefox-profile`. Keep that profile across VM
 restarts. The VNC startup script starts only Openbox; Firefox opens when a
 connection attempt starts. A fresh profile avoids Firefox's startup recovery
 dialog, which can otherwise leave the remote desktop apparently blank.
