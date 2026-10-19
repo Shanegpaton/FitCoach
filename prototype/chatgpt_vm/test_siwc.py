@@ -31,6 +31,7 @@ def test_authorization_request_and_restart(tmp_path):
         verifier='next', saved={'client_id': 'oaiapp_1', 'id_token': 'old', 'email': 'a@example.com'})).query)
     assert returning['client_id'] == ['oaiapp_1']
     assert 'agent_name_hint' not in returning
+    assert 'id_token_hint' not in returning
 
 
 @pytest.mark.parametrize('query', [

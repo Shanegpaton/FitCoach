@@ -97,13 +97,7 @@ class Gateway:
     @staticmethod
     def _launch_process(storage: Path) -> subprocess.Popen:
         env = os.environ.copy()
-        env['DISPLAY'] = ':1'
-        env['XAUTHORITY'] = str(Path.home() / '.Xauthority')
-        runtime = Path(f'/run/user/{os.getuid()}')
-        if runtime.is_dir():
-            env['XDG_RUNTIME_DIR'] = str(runtime)
-            env['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path={runtime}/bus'
-        env['BROWSER'] = '/usr/bin/firefox-esr'
+        env['FITCOACH_VM_BROWSER_SOCKET'] = '/run/fitcoach-browser/launch.sock'
         return subprocess.Popen([sys.executable, '-m', 'prototype.chatgpt_vm.siwc',
                                  'sign-in', '--storage', str(storage)],
                                 cwd=Path(__file__).resolve().parents[2], env=env,

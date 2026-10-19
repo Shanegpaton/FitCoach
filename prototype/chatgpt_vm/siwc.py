@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import socket
 import subprocess
 import threading
 import time
@@ -89,8 +90,6 @@ def authorization_url(*, host: str, redirect_uri: str, state: str, nonce: str,
         'code_challenge_method': 'S256', 'code_challenge': challenge(verifier),
     }
     if saved:
-        if saved.get('id_token'):
-            params['id_token_hint'] = saved['id_token']
         if saved.get('email'):
             params['login_hint'] = saved['email']
     else:
@@ -190,6 +189,18 @@ def listen_for_callback() -> tuple[HTTPServer, threading.Event, dict]:
 
 
 def open_vm_browser(url: str) -> None:
+    launcher = os.environ.get('FITCOACH_VM_BROWSER_SOCKET')
+    if launcher:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(6)
+                client.connect(launcher)
+                client.sendall(url.encode('utf-8') + b'\n')
+                if client.recv(32) != b'OK\n':
+                    raise SignInError('The VM browser could not start')
+        except OSError as exc:
+            raise SignInError('The VM browser could not start') from exc
+        return
     profile = Path(os.environ.get('FITCOACH_VM_FIREFOX_PROFILE',
                                   Path.home() / '.local/share/fitcoach-firefox-profile'))
     profile.mkdir(mode=0o700, parents=True, exist_ok=True)

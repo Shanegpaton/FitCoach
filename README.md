@@ -2,7 +2,7 @@
 
 ## ChatGPT connection experiment
 
-Settings contains an experimental [ChatGPT VM connection](prototype/chatgpt_vm/README.md) for one FitCoach account. The PWA verifies its Supabase sign-in with the VM, opens a protected VM browser, and shows the verified ChatGPT account and whether plan usage was granted. ChatGPT credentials stay on the VM; Coach still uses clearly labeled sample responses. The iPhone-to-VM browser path and a real OpenAI sign-in remain release checks. OpenAI eligibility for FitCoachGPT-operated VMs also needs confirmation before broader release.
+Settings contains an experimental [ChatGPT VM connection](prototype/chatgpt_vm/README.md) for one FitCoach account. The PWA verifies its Supabase sign-in with the VM, opens a protected VM browser, and shows the verified ChatGPT account and whether plan usage was granted. ChatGPT credentials stay in a separate system account on the VM, inaccessible to the remote browser account, which has no sudo access; Coach still uses clearly labeled sample responses. OpenAI eligibility for FitCoachGPT-operated VMs needs confirmation before broader release.
 
 FitCoachGPT is a phone-first workout planner and tracker. Build a routine, log your sets, and see your progress in a dark, installable Progressive Web App (PWA).
 

@@ -4,13 +4,18 @@ After=network.target
 
 [Service]
 Type=simple
-User=ubuntu
-Environment=HOME=/home/ubuntu
-WorkingDirectory=/home/ubuntu
+User=fitcoach-browser
+Group=fitcoach-browser
+Environment=HOME=/var/lib/fitcoach-browser
+Environment=XDG_RUNTIME_DIR=/run/fitcoach-browser-session
+WorkingDirectory=/var/lib/fitcoach-browser
+RuntimeDirectory=fitcoach-browser-session
+RuntimeDirectoryMode=0700
 ExecStart=/usr/bin/vncserver -fg :1 -localhost yes -geometry 480x900 -depth 24 -SecurityTypes None
 ExecStop=/usr/bin/vncserver -kill :1
 Restart=on-failure
 RestartSec=3
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
