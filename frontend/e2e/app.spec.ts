@@ -22,8 +22,18 @@ test.beforeEach(async ({ page, context }) => {
 test('VM connection pairs, opens the in-app browser, and reports verified scope', async ({ page, context }) => {
   let paired = false;
   let connected = false;
+  let stored = false;
   const connection = () => ({ paired, connected, email: connected ? 'coach@example.com' : null,
     name: connected ? 'Coach' : null, planUsageGranted: connected ? true : null });
+  await context.route('https://api.example.com/v1/chatgpt/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/v1/chatgpt/handoff') stored = true;
+    return route.fulfill({ json: stored ? { ...connection(), storedInBackend: true }
+      : { connected: false, email: null, name: null, planUsageGranted: null, storedInBackend: false },
+      headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+        'Access-Control-Allow-Headers': 'authorization,content-type',
+        'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS' } });
+  });
   await context.route('https://vm.example.com/v1/**', async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -33,7 +43,8 @@ test('VM connection pairs, opens the in-app browser, and reports verified scope'
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
     if (path === '/v1/pair') paired = true;
     if (path === '/v1/attempts/test') connected = true;
-    const body = path === '/v1/attempts' ? { id: 'test', state: 'pending', viewerToken: 'test-viewer' }
+    const body = path === '/v1/handoff' ? { code: 'a'.repeat(64) }
+      : path === '/v1/attempts' ? { id: 'test', state: 'pending', viewerToken: 'test-viewer' }
       : path === '/v1/attempts/test' ? { id: 'test', state: 'connected', connection: connection() }
         : connection();
     return route.fulfill({ json: body, headers });
@@ -50,6 +61,7 @@ test('VM connection pairs, opens the in-app browser, and reports verified scope'
   await expect(page.getByLabel('Tap a field on OpenAI’s page, then type here with your phone keyboard.')).toBeVisible();
   await expect(page.getByText('Connected to Coach.')).toBeVisible();
   await expect(page.getByText('ChatGPT plan usage: Granted at sign-in')).toBeVisible();
+  await expect(page.getByText('Connection saved in the backend. You can stop the VM.')).toBeVisible();
 });
 
 async function openApp(page: Page) {

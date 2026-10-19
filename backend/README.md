@@ -52,6 +52,8 @@ In the API project's Vercel environment settings, set:
 | `FITCOACH_SUPABASE_URL` | Your Supabase project HTTPS URL. |
 | `FITCOACH_SUPABASE_KEY` | Your Supabase publishable/anon key, used when checking bearer tokens with Supabase Auth. |
 | `FITCOACH_CORS_ORIGINS` | Exact HTTPS origin of the PWA, with no trailing slash. Use a comma-separated list only if more origins are intentionally allowed. |
+| `FITCOACH_CHATGPT_VM_ORIGIN` | Exact HTTPS origin of the paired VM for the one-use credential handoff. |
+| `FITCOACH_CHATGPT_SECRET` | A 32-byte base64url secret shared only with the VM's `FITCOACH_VM_HANDOFF_KEY`. It also derives the database encryption key. |
 
 Provision the restricted runtime role and run `alembic -c backend/alembic.ini upgrade head` with `FITCOACH_MIGRATION_DATABASE_URL` from a trusted local or CI environment **before** deploying the function. Do not run migrations during a function startup or give Vercel migration credentials. The API checks its runtime role and schema on each cold start and fails closed if they are unsafe or missing.
 
@@ -70,6 +72,17 @@ Set the frontend Vercel project's `VITE_FITCOACH_API_URL` to the API deployment'
 | `/v1/sync/changes?cursor=&limit=` | GET incremental aggregate changes and tombstones |
 | `/v1/sync/records/{resource}/{client_id}` | GET one current record after an upload conflict |
 | `/v1/sync/mutations` | POST up to 50 independently committed, idempotent aggregate mutations |
+| `/v1/chatgpt/connection` | GET metadata, DELETE encrypted credentials; never returns tokens |
+| `/v1/chatgpt/handoff` | POST a one-use VM handoff code; the API redeems it server-to-server and stores encrypted credentials |
+
+Migration `0003` creates `fitcoach.chatgpt_credentials` with forced row-level security and
+owner-scoped runtime grants. The API encrypts the complete verified OpenAI credential record before
+writing it to PostgreSQL. The browser receives only account display information and granted-plan
+status. The VM and API must share the handoff secret; do not put it in the PWA project or Git.
+Run Alembic before deploying code that uses these endpoints. Once Settings confirms the backend
+copy, the VM can be stopped. Coach still uses sample responses; token refresh and model requests
+are later work. Removing the backend record attempts OpenAI refresh-token revocation directly
+from the API even if the VM is off; if revocation cannot be confirmed, Settings tells the user.
 
 Bodies match `frontend/src/domain.ts`: camelCase, client IDs, ordered nested arrays, kilograms, nullable measurements, and local calendar dates. Unknown fields (including ownership and metadata) are rejected. Repeated nested IDs are valid across parents and sessions, but duplicates inside the same parent are rejected because they cannot identify relational rows. UTC timestamp strings retain the frontend's original precision. Decimal kilogram/RPE columns have no fixed scale; serialization introduces no application-level rounding.
 

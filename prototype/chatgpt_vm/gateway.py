@@ -32,6 +32,11 @@ class PairBody(BaseModel):
     code: str = Field(min_length=20, max_length=100)
 
 
+class HandoffBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    code: str = Field(min_length=40, max_length=100)
+
+
 class Gateway:
     def __init__(self, storage: Path, supabase_url: str, supabase_key: str, public_origin: str,
                  pwa_origin: str, verify_user=None, launch_process=None):
@@ -56,6 +61,7 @@ class Gateway:
         self.tickets: dict[str, tuple[str, float]] = {}
         self.sessions: dict[str, float] = {}
         self.viewers: dict[str, tuple[str, float]] = {}
+        self.handoffs: dict[str, tuple[str, float]] = {}
 
     async def verify_user(self, authorization: str) -> str:
         parts = authorization.split()
@@ -93,6 +99,29 @@ class Gateway:
                 'email': record.get('email') if record else None,
                 'name': record.get('name') if record else None,
                 'planUsageGranted': record.get('plan_usage_granted') if record else None}
+
+    def issue_handoff(self, user_id: str) -> dict:
+        with self.lock:
+            self.require_owner(user_id)
+            if not siwc.private_read(self.storage / 'credentials.json'):
+                raise HTTPException(409, 'Connect ChatGPT before saving this session')
+            code = secrets.token_urlsafe(48)
+            self.handoffs[hashlib.sha256(code.encode()).hexdigest()] = (user_id, time.time() + 120)
+            return {'code': code}
+
+    def redeem_handoff(self, user_id: str, code: str, key: str) -> dict:
+        configured = os.environ.get('FITCOACH_VM_HANDOFF_KEY', '')
+        if len(configured) < 32 or not hmac.compare_digest(key, configured):
+            raise HTTPException(403, 'Handoff service authentication failed')
+        with self.lock:
+            self.require_owner(user_id)
+            entry = self.handoffs.pop(hashlib.sha256(code.encode()).hexdigest(), None)
+            if not entry or entry[0] != user_id or time.time() >= entry[1]:
+                raise HTTPException(404, 'Handoff expired or already used')
+            record = siwc.private_read(self.storage / 'credentials.json')
+            if not record:
+                raise HTTPException(409, 'ChatGPT connection unavailable')
+            return {'userId': user_id, 'credentials': record}
 
     @staticmethod
     def _launch_process(storage: Path) -> subprocess.Popen:
@@ -164,6 +193,7 @@ class Gateway:
             self.tickets.clear()
             self.sessions.clear()
             self.viewers.clear()
+            self.handoffs.clear()
 
 
 def create_pair_code(storage: Path) -> str:
@@ -215,6 +245,15 @@ def create_app(gateway: Gateway) -> FastAPI:
         if linked and linked != user_id:
             raise HTTPException(403, 'This VM is linked to another account')
         return gateway.connection()
+
+    @app.post('/v1/handoff')
+    async def issue_handoff(user_id: str = Depends(owner)):
+        return gateway.issue_handoff(user_id)
+
+    @app.post('/v1/handoff/redeem')
+    async def redeem_handoff(body: HandoffBody, user_id: str = Depends(owner),
+                             x_fitcoach_handoff_key: str = Header(default='')):
+        return gateway.redeem_handoff(user_id, body.code, x_fitcoach_handoff_key)
 
     @app.post('/v1/attempts')
     async def start(_: str = Depends(owner)):

@@ -59,8 +59,13 @@ sudo -u fitcoach-auth HOME=/var/lib/fitcoach-auth .venv/bin/python -m prototype.
 ```
 
 Enter the code once in Settings. Then **Connect ChatGPT** creates a short-lived
-attempt and shows the VM browser inside the PWA. The PWA polls for the result; it
-never receives an OpenAI code or token. A second FitCoach user receives 403 from
+attempt and shows the VM browser inside the PWA. The PWA polls for the result. After sign-in,
+it receives a short-lived, one-use handoff code and submits that code to the authenticated
+training API. The API redeems the code directly with the VM, encrypts the OpenAI credential
+record, and stores it in the account-scoped Supabase PostgreSQL database. The PWA receives only
+connection status. Set `FITCOACH_VM_HANDOFF_KEY` in `/etc/fitcoach-vm.env` to the same 32-byte
+base64url value as the API project's `FITCOACH_CHATGPT_SECRET`. Keep the VM running until Settings
+confirms that the connection is saved in the backend. A second FitCoach user receives 403 from
 this VM. The viewer token is held only in PWA memory and is valid for ten minutes.
 Older deployments may still use a one-use launch link.
 The training API and account sync remain separate.

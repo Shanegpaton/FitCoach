@@ -173,3 +173,27 @@ def test_pair_code_expiry_and_pending_cancellation(setup, monkeypatch):
     assert client.delete('/v1/connection', headers=auth()).status_code == 204
     assert process.terminated
     assert client.get(f"/v1/attempts/{attempt['id']}", headers=auth()).json()['state'] == 'declined'
+
+
+def test_handoff_requires_owner_service_key_and_is_single_use(setup, monkeypatch):
+    vm, client, _, owner, _ = setup
+    code = gateway.create_pair_code(vm.storage)
+    client.post('/v1/pair', headers=auth(), json={'code': code})
+    siwc.private_write(vm.storage / 'credentials.json', {'access_token': 'access',
+        'refresh_token': 'refresh', 'id_token': 'id', 'client_id': 'oaiapp_test'})
+    monkeypatch.setenv('FITCOACH_VM_HANDOFF_KEY', 'secret-' * 8)
+    issued = client.post('/v1/handoff', headers=auth()).json()['code']
+    assert 'access' not in issued
+    assert client.post('/v1/handoff', headers=auth('other')).status_code == 403
+    assert client.post('/v1/handoff/redeem', headers=auth(), json={'code': issued}).status_code == 403
+    headers = {**auth(), 'X-FitCoach-Handoff-Key': 'secret-' * 8}
+    redeemed = client.post('/v1/handoff/redeem', headers=headers, json={'code': issued})
+    assert redeemed.status_code == 200
+    assert redeemed.json()['userId'] == owner
+    assert redeemed.json()['credentials']['refresh_token'] == 'refresh'
+    assert client.post('/v1/handoff/redeem', headers=headers, json={'code': issued}).status_code == 404
+    another = client.post('/v1/handoff', headers=auth()).json()['code']
+    assert client.post('/v1/handoff/redeem', headers={**auth('other'), 'X-FitCoach-Handoff-Key': 'secret-' * 8},
+                       json={'code': another}).status_code == 403
+    vm.handoffs[gateway.hashlib.sha256(another.encode()).hexdigest()] = (owner, 0)
+    assert client.post('/v1/handoff/redeem', headers=headers, json={'code': another}).status_code == 404

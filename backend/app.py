@@ -8,6 +8,7 @@ from uuid import UUID
 
 import httpx
 import sqlalchemy as sa
+from cryptography.fernet import InvalidToken
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,6 +21,7 @@ if __package__:
     from .database import Database, lock_user_mutations, set_identity
     from .domain import Exercise, Page, Plan, Profile, ScheduleOverride, Session
     from . import schema as db_schema
+    from . import chatgpt_credentials as chatgpt
     from .store import RESOURCES, Store, etag
 else:
     from auth import AuthVerifier, identity
@@ -27,6 +29,7 @@ else:
     from database import Database, lock_user_mutations, set_identity
     from domain import Exercise, Page, Plan, Profile, ScheduleOverride, Session
     import schema as db_schema
+    import chatgpt_credentials as chatgpt
     from store import RESOURCES, Store, etag
 
 User = Annotated[UUID, Depends(identity)]
@@ -49,6 +52,11 @@ class SyncMutation(BaseModel):
 class SyncBatch(BaseModel):
     model_config = ConfigDict(extra='forbid')
     mutations: list[SyncMutation] = Field(min_length=1, max_length=50)
+
+
+class ChatGPTHandoff(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    code: str = Field(min_length=40, max_length=100)
 
 
 @asynccontextmanager
@@ -108,6 +116,79 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
     @app.get('/v1/me')
     async def me(user: User):
         return {'id': str(user)}
+
+    @app.get('/v1/chatgpt/connection')
+    async def chatgpt_connection(user: User):
+        async with database.sessions() as session:
+            async with session.begin():
+                await set_identity(session, user)
+                row = (await session.execute(sa.text('''SELECT email, name, plan_usage_granted
+                    FROM fitcoach.chatgpt_credentials WHERE user_id = :user_id'''),
+                    {'user_id': user})).mappings().first()
+        return {'connected': bool(row), 'email': row['email'] if row else None,
+                'name': row['name'] if row else None,
+                'planUsageGranted': row['plan_usage_granted'] if row else None,
+                'storedInBackend': bool(row)}
+
+    @app.post('/v1/chatgpt/handoff')
+    async def claim_chatgpt_handoff(body: ChatGPTHandoff, request: Request, user: User):
+        try:
+            secret = chatgpt.handoff_secret()
+            origin = chatgpt.vm_origin()
+            authorization = request.headers['authorization']
+        except (ValueError, KeyError):
+            raise HTTPException(503, 'ChatGPT credential handoff is not configured') from None
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+                response = await client.post(f'{origin}/v1/handoff/redeem',
+                    headers={'Authorization': authorization, 'X-FitCoach-Handoff-Key': secret},
+                    json={'code': body.code})
+            if response.status_code != 200:
+                raise HTTPException(502, 'The VM credential handoff expired or failed')
+            record = chatgpt.validate_record(response.json(), str(user))
+            ciphertext = chatgpt.encrypt_record(record)
+        except httpx.RequestError:
+            raise HTTPException(503, 'The VM is unavailable for credential handoff') from None
+        except (ValueError, TypeError, KeyError):
+            raise HTTPException(502, 'The VM returned an invalid credential record') from None
+        async with database.sessions() as session:
+            async with session.begin():
+                await set_identity(session, user)
+                await session.execute(sa.text('''INSERT INTO fitcoach.chatgpt_credentials
+                    (user_id, ciphertext, email, name, plan_usage_granted)
+                    VALUES (:user_id, :ciphertext, :email, :name, :granted)
+                    ON CONFLICT (user_id) DO UPDATE SET ciphertext = EXCLUDED.ciphertext,
+                        email = EXCLUDED.email, name = EXCLUDED.name,
+                        plan_usage_granted = EXCLUDED.plan_usage_granted, updated_at = now()'''),
+                    {'user_id': user, 'ciphertext': ciphertext, 'email': record.get('email'),
+                     'name': record.get('name'), 'granted': record['plan_usage_granted']})
+        return {'connected': True, 'email': record.get('email'), 'name': record.get('name'),
+                'planUsageGranted': record['plan_usage_granted'], 'storedInBackend': True}
+
+    @app.delete('/v1/chatgpt/connection')
+    async def delete_chatgpt_connection(user: User):
+        async with database.sessions() as session:
+            async with session.begin():
+                await set_identity(session, user)
+                ciphertext = await session.scalar(sa.text('''SELECT ciphertext FROM fitcoach.chatgpt_credentials
+                    WHERE user_id = :user_id'''), {'user_id': user})
+        if not ciphertext:
+            return {'cleared': True, 'revocationConfirmed': None}
+        try:
+            record = chatgpt.decrypt_record(ciphertext)
+        except (InvalidToken, ValueError, UnicodeDecodeError):
+            # A wrong encryption key must not silently discard the only recoverable record.
+            raise HTTPException(503, 'ChatGPT credential store cannot be decrypted') from None
+        revoked = await chatgpt.revoke_record(record)
+        async with database.sessions() as session:
+            async with session.begin():
+                await set_identity(session, user)
+                removed = await session.scalar(sa.text('''DELETE FROM fitcoach.chatgpt_credentials
+                    WHERE user_id = :user_id AND ciphertext = :ciphertext RETURNING user_id'''),
+                    {'user_id': user, 'ciphertext': ciphertext})
+                if not removed:
+                    raise HTTPException(409, 'ChatGPT connection changed during disconnect; retry')
+        return {'cleared': True, 'revocationConfirmed': revoked}
 
     @app.get('/v1/sync/changes')
     async def sync_changes(user: User, cursor: Annotated[int, Query(ge=0)] = 0,
