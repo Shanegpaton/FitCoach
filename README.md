@@ -103,8 +103,8 @@ use the keyboard relay below it to type and send Enter, Tab, or Backspace. The
 relay clears its input after each keystroke; the OAuth callback completes on the VM. A one-use
 handoff moves verified credentials to the encrypted backend store. The backend then clears
 the VM session. The PWA receives only connection status and a short-lived viewer token.
-Set `VITE_CHATGPT_VM_URL` to the
-VM's HTTPS origin in the frontend deployment. See
+The production build sets `VITE_CHATGPT_VM_URL` to the public VM HTTPS origin in
+`frontend/.env.production`; override it in the frontend deployment if the VM moves. See
 [the VM prototype guide](prototype/chatgpt_vm/README.md) for service setup and
 release gates.
 
