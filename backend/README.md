@@ -74,14 +74,14 @@ Set the frontend Vercel project's `VITE_FITCOACH_API_URL` to the API deployment'
 | `/v1/sync/mutations` | POST up to 50 independently committed, idempotent aggregate mutations |
 | `/v1/chatgpt/connection` | GET metadata, DELETE encrypted credentials; never returns tokens |
 | `/v1/chatgpt/handoff` | POST a one-use VM handoff code; the API redeems it server-to-server and stores encrypted credentials |
+| `/v1/chatgpt/coach` | POST recent messages and bounded training context; returns a completed text reply with no token data |
 
 Migration `0003` creates `fitcoach.chatgpt_credentials` with forced row-level security and
 owner-scoped runtime grants. The API encrypts the complete verified OpenAI credential record before
 writing it to PostgreSQL. The browser receives only account display information and granted-plan
 status. The VM and API must share the handoff secret; do not put it in the PWA project or Git.
 Run Alembic before deploying code that uses these endpoints. Once Settings confirms the backend
-copy, the VM can be stopped. Coach still uses sample responses; token refresh and model requests
-are later work. Removing the backend record attempts OpenAI refresh-token revocation directly
+copy, the VM can be stopped. When plan usage is granted, Coach calls the API, which serializes refreshes per account, selects an available model from that account's catalog, and consumes a `store: false`, `stream: true` Responses API request through completion. The PWA never receives an OpenAI token. Removing the backend record attempts OpenAI refresh-token revocation directly
 from the API even if the VM is off; if revocation cannot be confirmed, Settings tells the user.
 
 Bodies match `frontend/src/domain.ts`: camelCase, client IDs, ordered nested arrays, kilograms, nullable measurements, and local calendar dates. Unknown fields (including ownership and metadata) are rejected. Repeated nested IDs are valid across parents and sessions, but duplicates inside the same parent are rejected because they cannot identify relational rows. UTC timestamp strings retain the frontend's original precision. Decimal kilogram/RPE columns have no fixed scale; serialization introduces no application-level rounding.

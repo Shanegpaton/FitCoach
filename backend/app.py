@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import hashlib
 import json
 import logging
+import time
 from typing import Annotated
 from uuid import UUID
 
@@ -22,6 +23,7 @@ if __package__:
     from .domain import Exercise, Page, Plan, Profile, ScheduleOverride, Session
     from . import schema as db_schema
     from . import chatgpt_credentials as chatgpt
+    from . import chatgpt_inference as inference
     from .store import RESOURCES, Store, etag
 else:
     from auth import AuthVerifier, identity
@@ -30,6 +32,7 @@ else:
     from domain import Exercise, Page, Plan, Profile, ScheduleOverride, Session
     import schema as db_schema
     import chatgpt_credentials as chatgpt
+    import chatgpt_inference as inference
     from store import RESOURCES, Store, etag
 
 User = Annotated[UUID, Depends(identity)]
@@ -57,6 +60,18 @@ class SyncBatch(BaseModel):
 class ChatGPTHandoff(BaseModel):
     model_config = ConfigDict(extra='forbid')
     code: str = Field(min_length=40, max_length=100)
+
+
+class CoachMessage(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    role: str = Field(pattern='^(user|assistant)$')
+    text: str = Field(min_length=1, max_length=5000)
+
+
+class CoachRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    messages: list[CoachMessage] = Field(min_length=1, max_length=16)
+    context: str = Field(default='', max_length=4000)
 
 
 @asynccontextmanager
@@ -189,6 +204,40 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                 if not removed:
                     raise HTTPException(409, 'ChatGPT connection changed during disconnect; retry')
         return {'cleared': True, 'revocationConfirmed': revoked}
+
+    @app.post('/v1/chatgpt/coach')
+    async def chatgpt_coach(body: CoachRequest, user: User):
+        if body.messages[-1].role != 'user':
+            raise HTTPException(422, 'The last message must be from the user')
+        # Hold the account row lock during refresh so concurrent workers cannot rotate
+        # the same single-use refresh token independently.
+        async with database.sessions() as session:
+            async with session.begin():
+                await set_identity(session, user)
+                ciphertext = await session.scalar(sa.text('''SELECT ciphertext FROM fitcoach.chatgpt_credentials
+                    WHERE user_id = :user_id FOR UPDATE'''), {'user_id': user})
+                if not ciphertext:
+                    raise HTTPException(409, 'Connect ChatGPT in Settings first.')
+                try:
+                    record = chatgpt.decrypt_record(ciphertext)
+                except (InvalidToken, ValueError, UnicodeDecodeError):
+                    raise HTTPException(503, 'ChatGPT credential store cannot be decrypted') from None
+                if not record.get('plan_usage_granted') or 'chatgpt.tokens.use.direct' not in record.get('scopes', []):
+                    raise HTTPException(403, 'ChatGPT plan usage was not granted. Reconnect in Settings.')
+                if record['expires_at'] <= time.time() + 120:
+                    try:
+                        record = await inference.refresh_record(record)
+                    except inference.InferenceError as exc:
+                        raise HTTPException(exc.status, exc.message) from None
+                    await session.execute(sa.text('''UPDATE fitcoach.chatgpt_credentials
+                        SET ciphertext = :ciphertext, updated_at = now() WHERE user_id = :user_id'''),
+                        {'user_id': user, 'ciphertext': chatgpt.encrypt_record(record)})
+        try:
+            reply = await inference.complete_response(record['access_token'],
+                [message.model_dump() for message in body.messages], body.context)
+        except inference.InferenceError as exc:
+            raise HTTPException(exc.status, exc.message) from None
+        return {'text': reply}
 
     @app.get('/v1/sync/changes')
     async def sync_changes(user: User, cursor: Annotated[int, Query(ge=0)] = 0,

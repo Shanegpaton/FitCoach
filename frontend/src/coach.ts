@@ -6,7 +6,6 @@ export interface ChatRequest { messages: Message[]; profile: Profile; plan?: Pla
 export interface ChatReply { text: string; proposal?: Plan; baseRevision?: number | null }
 export interface ChatAdapter { respond(request: ChatRequest): Promise<ChatReply> }
 
-// UI demonstration only. A future local-model or hosted adapter can implement this interface.
 export const sampleCoach: ChatAdapter = {
   async respond({ messages, profile, plan }) {
     const text = messages.at(-1)?.text.toLowerCase() ?? '';
@@ -29,4 +28,5 @@ export const sampleCoach: ChatAdapter = {
   },
 };
 
-export const assistantMessage = (text: string): Message => ({ id: uid(), role: 'assistant', text, createdAt: new Date().toISOString() });
+export const assistantMessage = (text: string, source: 'sample' | 'chatgpt' = 'sample'): Message =>
+  ({ id: uid(), role: 'assistant', text, createdAt: new Date().toISOString(), source });

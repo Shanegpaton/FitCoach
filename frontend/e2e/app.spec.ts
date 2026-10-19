@@ -157,6 +157,33 @@ test('sample Coach proposal is editable and only saved after Apply', async ({ pa
   await expect(page.getByRole('heading', { name: 'Reviewed routine', exact: true })).toBeVisible();
 });
 
+test('connected Coach sends through the API and labels the saved reply', async ({ page, context }) => {
+  const calls: unknown[] = [];
+  await context.route('https://api.example.com/v1/chatgpt/**', async route => {
+    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+      'Access-Control-Allow-Headers': 'authorization,content-type',
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (route.request().url().endsWith('/coach')) {
+      calls.push(route.request().postDataJSON());
+      return route.fulfill({ json: { text: 'Start with two training days.' }, headers });
+    }
+    return route.fulfill({ json: { connected: true, planUsageGranted: true, storedInBackend: true }, headers });
+  });
+  await openApp(page);
+  await page.getByRole('link', { name: 'Coach', exact: true }).click();
+  await expect(page.getByText('ChatGPT Coach', { exact: true })).toBeVisible();
+  await page.getByLabel('Message Coach').fill('How should I begin?');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(page.getByText('Start with two training days.')).toBeVisible();
+  await expect(page.getByText('COACH · CHATGPT')).toBeVisible();
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({ messages: [{ role: 'user', text: 'How should I begin?' }] });
+  await page.reload();
+  await page.getByRole('link', { name: 'Coach', exact: true }).click();
+  await expect(page.getByText('Start with two training days.')).toBeVisible();
+});
+
 test('custom exercise, superset flow and durable rest timer', async ({ page }) => {
   await openApp(page); await makePlan(page);
   await page.getByRole('link', { name: 'Plan', exact: true }).click();

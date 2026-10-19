@@ -67,6 +67,7 @@ export const sessionSchema = z.object({
 export const overrideSchema = z.object({ id, planId: id, workoutId: id, originalDate: date, date });
 export const messageSchema = z.object({
   id, role: z.enum(['user', 'assistant']), text: z.string().min(1).max(10000), createdAt: timestamp,
+  source: z.enum(['sample', 'chatgpt']).optional(),
 });
 export const proposalSchema = z.object({
   id, messageId: id, plan: planSchema, status: z.enum(['pending', 'applied', 'rejected']),

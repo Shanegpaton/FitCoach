@@ -7,6 +7,7 @@ from cryptography.fernet import InvalidToken
 
 from backend import app as api_module
 from backend import chatgpt_credentials as vault
+from backend import chatgpt_inference as inference
 from backend.database import set_identity
 from backend.tests.fixtures import headers
 
@@ -74,3 +75,30 @@ async def test_handoff_stores_only_for_verified_account(api, monkeypatch):
     assert removed.status_code == 200
     assert removed.json()['revocationConfirmed'] is True
     assert (await client.get('/v1/chatgpt/connection', headers=headers())).json()['connected'] is False
+
+
+async def test_coach_uses_only_verified_accounts_credential(api, monkeypatch):
+    client, database, users, _ = api
+    monkeypatch.setenv('FITCOACH_CHATGPT_SECRET', secrets.token_urlsafe(32))
+    owner_record = record(str(users['a']))['credentials']
+    async with database.sessions() as session:
+        async with session.begin():
+            await set_identity(session, users['a'])
+            await session.execute(sa.text('''INSERT INTO fitcoach.chatgpt_credentials
+                (user_id, ciphertext, email, plan_usage_granted)
+                VALUES (:user_id, :ciphertext, :email, true)'''),
+                {'user_id': users['a'], 'ciphertext': vault.encrypt_record(owner_record),
+                 'email': owner_record['email']})
+    seen = []
+    async def complete(token, messages, context):
+        seen.append((token, messages, context))
+        return 'Two easy training days are a good start.'
+    monkeypatch.setattr(inference, 'complete_response', complete)
+    body = {'messages': [{'role': 'user', 'text': 'Where should I begin?'}], 'context': 'Beginner'}
+    other = await client.post('/v1/chatgpt/coach', headers=headers('b'), json=body)
+    assert other.status_code == 409
+    own = await client.post('/v1/chatgpt/coach', headers=headers(), json=body)
+    assert own.status_code == 200
+    assert own.json() == {'text': 'Two easy training days are a good start.'}
+    assert seen == [('access-secret', body['messages'], 'Beginner')]
+    assert 'access-secret' not in own.text

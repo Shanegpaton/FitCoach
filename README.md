@@ -2,7 +2,7 @@
 
 ## ChatGPT connection experiment
 
-Settings contains an experimental [ChatGPT VM connection](prototype/chatgpt_vm/README.md) for one FitCoach account. The PWA verifies its Supabase sign-in with the VM, opens a protected VM browser, and shows the verified ChatGPT account and whether plan usage was granted. After sign-in, a one-use server-to-server handoff stores encrypted credentials in the account-scoped Supabase PostgreSQL backend, so the VM can be stopped. The PWA receives only connection status; Coach still uses clearly labeled sample responses. OpenAI eligibility for FitCoachGPT-operated VMs needs confirmation before broader release.
+Settings contains an experimental [ChatGPT VM connection](prototype/chatgpt_vm/README.md) for one FitCoach account. The PWA verifies its Supabase sign-in with the VM, opens a protected VM browser, and shows the verified ChatGPT account and whether plan usage was granted. After sign-in, a one-use server-to-server handoff stores encrypted credentials in the account-scoped Supabase PostgreSQL backend, so the VM can be stopped. The PWA receives only connection status. With granted plan usage, Coach sends online requests through the authenticated API; the API refreshes tokens and calls the Responses API. Offline or disconnected Coach uses labeled sample responses. OpenAI eligibility for FitCoachGPT-operated VMs needs confirmation before broader release.
 
 FitCoachGPT is a phone-first workout planner and tracker. Build a routine, log your sets, and see your progress in a dark, installable Progressive Web App (PWA).
 
@@ -57,7 +57,7 @@ Today, Plan, Coach, and History are the four primary tabs. Weight progression is
 
 ### Coach in this milestone
 
-Coach is a clearly labeled UI demo with sample conversations and editable plan proposals. Review and apply a proposal to save it; proposals do not change your plan automatically. Freeform conversation and live AI are deferred. The typed `ChatAdapter` in `frontend/src/coach.ts` provides the integration point for a future local-model or hosted provider.
+Coach uses ChatGPT for freeform conversation when the signed-in account has granted ChatGPT plan usage and the API is reachable. Replies are labeled ChatGPT and saved only on that device. Without the grant or while offline, Coach uses labeled sample responses and editable sample plan proposals. Review and apply a proposal to save it; proposals do not change your plan automatically. Live replies do not create or edit plans. The typed `ChatAdapter` in `frontend/src/coach.ts` keeps the two modes separate.
 
 The PWA does not currently call Ollama or the Python backend. That existing backend and its scientific corpus remain available separately below.
 
