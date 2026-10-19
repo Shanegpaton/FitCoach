@@ -19,6 +19,11 @@ The loopback desktop is managed by the two units in [`systemd/`](systemd/):
 Enable the `ubuntu` user session at boot with `sudo loginctl enable-linger ubuntu`;
 the Snap Firefox launcher needs its `/run/user/<uid>` runtime and D-Bus socket
 when the gateway starts it from a system service.
+The sign-in command launches Firefox with a dedicated owner-only profile at
+`~/snap/firefox/common/fitcoach-browser-profile`. Keep that profile across VM
+restarts. The VNC startup script starts only Openbox; Firefox opens when a
+connection attempt starts. A fresh profile avoids Firefox's startup recovery
+dialog, which can otherwise leave the remote desktop apparently blank.
 The VNC display accepts connections only from VM loopback; the public browser
 route is protected by the gateway's short-lived session. The gateway
 service binds to `127.0.0.1:8787`; [Caddyfile.example](Caddyfile.example) is the

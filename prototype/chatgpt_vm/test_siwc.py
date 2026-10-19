@@ -88,6 +88,24 @@ def test_protected_credential_file(tmp_path):
         siwc.private_read(path)
 
 
+def test_vm_browser_uses_private_dedicated_profile(tmp_path, monkeypatch):
+    profile = tmp_path / 'firefox-profile'
+    monkeypatch.setenv('FITCOACH_VM_FIREFOX_PROFILE', str(profile))
+    launched = {}
+
+    def fake_popen(args, **kwargs):
+        launched['args'] = args
+        launched['kwargs'] = kwargs
+        return SimpleNamespace(wait=lambda timeout: 0)
+
+    monkeypatch.setattr(siwc.subprocess, 'Popen', fake_popen)
+    siwc.open_vm_browser('https://example.com/sign-in')
+    assert launched['args'] == ['/usr/bin/firefox', '--profile', str(profile),
+                                '--new-window', 'https://example.com/sign-in']
+    assert stat.S_IMODE(profile.stat().st_mode) == 0o700
+    assert launched['kwargs']['stdout'] == siwc.subprocess.DEVNULL
+
+
 def test_identity_verification_requires_claims_and_nonce(monkeypatch):
     calls = {}
     class KeyClient:

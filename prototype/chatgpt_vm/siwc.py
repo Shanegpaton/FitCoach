@@ -14,11 +14,11 @@ import json
 import os
 from pathlib import Path
 import secrets
+import subprocess
 import threading
 import time
 from urllib.parse import parse_qs, urlencode, urlsplit
 from uuid import uuid4
-import webbrowser
 
 import httpx
 
@@ -189,6 +189,27 @@ def listen_for_callback() -> tuple[HTTPServer, threading.Event, dict]:
     return server, done, result
 
 
+def open_vm_browser(url: str) -> None:
+    profile = Path(os.environ.get('FITCOACH_VM_FIREFOX_PROFILE',
+                                  Path.home() / 'snap/firefox/common/fitcoach-browser-profile'))
+    profile.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if profile.is_symlink() or profile.stat().st_mode & 0o077:
+        raise SignInError('Firefox profile must be owner-only and cannot be a symlink')
+    try:
+        process = subprocess.Popen(['/usr/bin/firefox', '--profile', str(profile),
+                                    '--new-window', url], stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   close_fds=True)
+    except OSError as exc:
+        raise SignInError('The VM browser could not start') from exc
+    try:
+        exit_code = process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        return  # A new Firefox process stays running while the user signs in.
+    if exit_code != 0:
+        raise SignInError('The VM browser could not start')
+
+
 def sign_in(storage: Path) -> None:
     private_dir(storage)
     host = host_id(storage / 'host.json')
@@ -201,8 +222,7 @@ def sign_in(storage: Path) -> None:
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     try:
-        if not webbrowser.open(url):
-            raise SignInError('The VM browser did not open')
+        open_vm_browser(url)
         print('Complete authorization in the VM browser. Waiting up to five minutes for its loopback callback.')
         if not done.wait(TIMEOUT_SECONDS):
             raise SignInError('Authorization timed out')
