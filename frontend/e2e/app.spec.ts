@@ -165,7 +165,10 @@ test('connected Coach sends through the API and labels the saved reply', async (
   await expect(page.getByText('Start with two training days.')).toBeVisible();
   await expect(page.getByText('COACH · CHATGPT')).toBeVisible();
   expect(calls).toHaveLength(1);
-  expect(calls[0]).toMatchObject({ messages: [{ role: 'user', text: 'How should I begin?' }] });
+  expect(calls[0]).toMatchObject({ messages: [{ role: 'user', text: 'How should I begin?' }],
+    trainingDataReady: false });
+  expect(calls[0]).toHaveProperty('localDate', expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
+  expect(calls[0]).not.toHaveProperty('context');
   await page.reload();
   await page.getByRole('link', { name: 'Coach', exact: true }).click();
   await expect(page.getByText('Start with two training days.')).toBeVisible();

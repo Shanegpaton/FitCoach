@@ -116,7 +116,9 @@ export function App() {
       : syncStatus.failed ? `${syncStatus.failed} failed`
       : syncStatus.state === 'syncing' ? 'Syncing…' : syncStatus.state === 'error'
         ? 'Sync needs attention' : Math.max(syncStatus.pending, localPending) ? `${Math.max(syncStatus.pending, localPending)} pending` : 'Synced';
-  return <AppContext.Provider value={{ ...data, notify, run }}>
+  const trainingDataReady = Boolean(syncStatus?.state === 'idle' && syncStatus.lastSuccessAt
+    && !syncStatus.pending && !syncStatus.failed && !syncStatus.conflicts && !localPending);
+  return <AppContext.Provider value={{ ...data, trainingDataReady, notify, run }}>
     <div className="app-shell">
       <header className="app-header"><Link to="/" className="brand" aria-label="FitCoach home"><span className="brand-mark">f.</span><span>fitcoach<span className="brand-dot">.</span></span></Link>
         <div className="header-right"><Link className="local-badge" to="/settings" aria-label={`Synchronization: ${syncStatus?.message ?? syncLabel}`}><span />{auth.offlineAccess ? 'Offline · saved here' : syncLabel}</Link><Link className="icon-button" to="/settings" aria-label="Settings"><SettingsIcon size={20} /></Link><button className="icon-button" aria-label="Sign out" title={auth.email ? `Sign out ${auth.email}` : 'Sign out'} onClick={() => void auth.signOut()}><LogOut size={18} /></button></div></header>

@@ -7,7 +7,7 @@ from cryptography.fernet import InvalidToken
 
 from backend import app as api_module
 from backend import chatgpt_credentials as vault
-from backend import chatgpt_inference as inference
+from backend.agent import inference
 from backend.database import set_identity
 from backend.tests.fixtures import headers
 
@@ -93,15 +93,18 @@ async def test_coach_uses_only_verified_accounts_credential(api, monkeypatch):
                 {'user_id': users['a'], 'ciphertext': vault.encrypt_record(owner_record),
                  'email': owner_record['email']})
     seen = []
-    async def complete(token, messages, context):
-        seen.append((token, messages, context))
-        return 'Two easy training days are a good start.'
-    monkeypatch.setattr(inference, 'complete_response', complete)
-    body = {'messages': [{'role': 'user', 'text': 'Where should I begin?'}], 'context': 'Beginner'}
+    async def complete(token, input_items, tools, ready):
+        seen.append((token, input_items, tools, ready))
+        return {'output': [{'type': 'message', 'content': [
+            {'type': 'output_text', 'text': 'Two easy training days are a good start.'}]}],
+            'text': 'Two easy training days are a good start.'}
+    monkeypatch.setattr(inference, 'complete_agent_turn', complete)
+    body = {'messages': [{'role': 'user', 'text': 'Where should I begin?'}],
+            'localDate': '2026-10-20', 'trainingDataReady': False}
     other = await client.post('/v1/chatgpt/coach', headers=headers('b'), json=body)
     assert other.status_code == 409
     own = await client.post('/v1/chatgpt/coach', headers=headers(), json=body)
     assert own.status_code == 200
     assert own.json() == {'text': 'Two easy training days are a good start.'}
-    assert seen == [('access-secret', body['messages'], 'Beginner')]
+    assert seen == [('access-secret', [{'role': 'user', 'content': 'Where should I begin?'}], [], False)]
     assert 'access-secret' not in own.text

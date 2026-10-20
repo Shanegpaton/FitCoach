@@ -7,6 +7,7 @@ export interface AppData {
   overrides: ScheduleOverride[]; messages: Message[]; proposals: Proposal[];
 }
 export interface AppState extends AppData {
+  trainingDataReady: boolean;
   notify: (message: string, error?: boolean) => void;
   run: (action: () => Promise<unknown>, success?: string) => Promise<boolean>;
 }

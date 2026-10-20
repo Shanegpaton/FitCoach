@@ -1,6 +1,14 @@
 # Training API
 
-This FastAPI application stores training documents in relational PostgreSQL tables and serves authenticated synchronization for the React PWA. It is separate from the Python RAG CLI. The PWA remains offline-first in account-scoped IndexedDB; the API receives queued mutations and supplies incremental changes without blocking local logging. Conversations/proposals and live Coach integration remain local/deferred.
+This FastAPI application stores training documents in relational PostgreSQL tables and serves authenticated synchronization for the React PWA. It is separate from the Python RAG CLI. The PWA remains offline-first in account-scoped IndexedDB; the API receives queued mutations and supplies incremental changes without blocking local logging. Connected accounts can request live ChatGPT Coach replies through the API. Conversations and proposals remain local to the device and are not synchronized.
+
+## Coach agent
+
+`backend/agent/graph.py` provides a bounded LangGraph loop for a live Coach request: `START -> model -> (tool -> model)* -> END`. `backend/agent/inference.py` handles the ChatGPT Responses API call, and `backend/agent/tools/database.py` defines validated read-only database tools. The authenticated `/v1/chatgpt/coach` endpoint validates recent messages and the final user turn with Pydantic. It verifies the account, reads only that account's encrypted credential, refreshes it when needed, and invokes the graph. The access token and verified user ID stay in API closures rather than graph state; the response remains `{ "text": "..." }`.
+
+The model may call `search_workout_sessions`, `get_workout_sessions`, `get_exercise_history`, `get_training_profile`, `search_training_plans`, `get_training_plans`, and `search_exercises`. Search tools return compact pages; detail tools return stored snapshots or definitions. Filters include exact IDs, recorded names, completed/active status, absolute dates, calendar-relative periods, and nearest date windows. For example, a bench press question about one year ago searches a ±45-day window centered on the same local calendar date last year. Exercise history reports recorded sets, best recorded set, and external-load volume in kg; it does not estimate one-rep max. Tool arguments are Pydantic validated and become only parameters in allowlisted SQLAlchemy queries. Each call runs in a read-only transaction using the verified account identity and existing row-level security. Cursors, page sizes, result bytes, and the graph's six tool calls are bounded. The agent cannot send SQL or write workout data.
+
+The PWA sends `localDate` and `trainingDataReady` with recent messages. It marks data ready only after account bootstrap and a successful sync with no pending changes or conflicts. Until then, live Coach can answer general questions, but database tools are unavailable and it asks the user to wait for personal training answers. This is a single-request graph over recent messages, with no persistent agent memory, plan mutations, workout logging, or access to the independent `fitcoach/` RAG corpus. Offline or disconnected PWA Coach still uses labeled sample responses. Install with `pip install -r backend/requirements-dev.txt` and run the API as described below; no separate agent server is needed.
 
 ## Configure and run
 
@@ -77,7 +85,7 @@ Set the frontend Vercel project's `VITE_FITCOACH_API_URL` to the API deployment'
 | `/v1/chatgpt/vm/save` | POST server-side credential handoff; confirms VM cleanup after database commit |
 | `/v1/chatgpt/vm/cleanup` | POST clear this account's leftover VM copy only after confirming a stored backend record |
 | `/v1/chatgpt/handoff` | POST a one-use VM handoff code; the API redeems it server-to-server and stores encrypted credentials |
-| `/v1/chatgpt/coach` | POST recent messages and bounded training context; returns a completed text reply with no token data |
+| `/v1/chatgpt/coach` | POST recent messages, local date, and sync readiness; returns a completed text reply with no token data |
 
 Migration `0003` creates `fitcoach.chatgpt_credentials` with forced row-level security and
 owner-scoped runtime grants. The API encrypts the complete verified OpenAI credential record before

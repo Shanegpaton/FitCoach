@@ -4,7 +4,8 @@ import hashlib
 import json
 import logging
 import time
-from typing import Annotated
+from typing import Annotated, Literal
+from datetime import date
 from uuid import UUID
 
 import httpx
@@ -14,7 +15,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError, DataError, IntegrityError, TimeoutError
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 if __package__:
     from .auth import AuthVerifier, identity
@@ -23,7 +24,9 @@ if __package__:
     from .domain import Exercise, Page, Plan, Profile, ScheduleOverride, Session
     from . import schema as db_schema
     from . import chatgpt_credentials as chatgpt
-    from . import chatgpt_inference as inference
+    from .agent import inference
+    from .agent.graph import build_coach_graph
+    from .agent.tools.database import TOOL_SPECS, run_database_tool
     from .store import RESOURCES, Store, etag
 else:
     from auth import AuthVerifier, identity
@@ -32,7 +35,9 @@ else:
     from domain import Exercise, Page, Plan, Profile, ScheduleOverride, Session
     import schema as db_schema
     import chatgpt_credentials as chatgpt
-    import chatgpt_inference as inference
+    from agent import inference
+    from agent.graph import build_coach_graph
+    from agent.tools.database import TOOL_SPECS, run_database_tool
     from store import RESOURCES, Store, etag
 
 User = Annotated[UUID, Depends(identity)]
@@ -64,14 +69,28 @@ class ChatGPTHandoff(BaseModel):
 
 class CoachMessage(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    role: str = Field(pattern='^(user|assistant)$')
+    role: Literal['user', 'assistant']
     text: str = Field(min_length=1, max_length=5000)
+
+    @field_validator('text')
+    @classmethod
+    def nonblank_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError('Coach message cannot be blank')
+        return value
 
 
 class CoachRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     messages: list[CoachMessage] = Field(min_length=1, max_length=16)
-    context: str = Field(default='', max_length=4000)
+    localDate: date | None = None
+    trainingDataReady: bool = False
+
+    @model_validator(mode='after')
+    def last_message_is_user(self):
+        if self.messages[-1].role != 'user':
+            raise ValueError('The last message must be from the user')
+        return self
 
 
 @asynccontextmanager
@@ -289,8 +308,6 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
 
     @app.post('/v1/chatgpt/coach')
     async def chatgpt_coach(body: CoachRequest, user: User):
-        if body.messages[-1].role != 'user':
-            raise HTTPException(422, 'The last message must be from the user')
         # Hold the account row lock during refresh so concurrent workers cannot rotate
         # the same single-use refresh token independently.
         async with database.sessions() as session:
@@ -315,11 +332,22 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                         SET ciphertext = :ciphertext, updated_at = now() WHERE user_id = :user_id'''),
                         {'user_id': user, 'ciphertext': chatgpt.encrypt_record(record)})
         try:
-            reply = await inference.complete_response(record['access_token'],
-                [message.model_dump() for message in body.messages], body.context)
+            async def respond(input_items):
+                return await inference.complete_agent_turn(record['access_token'], input_items,
+                    TOOL_SPECS if body.trainingDataReady else [], body.trainingDataReady)
+
+            async def run_tool(name, arguments):
+                if not body.trainingDataReady:
+                    raise inference.InferenceError(502, 'Training data is still syncing.')
+                return await run_database_tool(name, arguments, database, user,
+                    body.localDate or date.today())
+
+            result = await build_coach_graph(respond, run_tool).ainvoke({
+                'input': [{'role': message.role, 'content': message.text} for message in body.messages],
+            })
         except inference.InferenceError as exc:
             raise HTTPException(exc.status, exc.message) from None
-        return {'text': reply}
+        return {'text': result['text']}
 
     @app.get('/v1/sync/changes')
     async def sync_changes(user: User, cursor: Annotated[int, Query(ge=0)] = 0,

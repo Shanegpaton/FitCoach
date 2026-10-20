@@ -10,7 +10,7 @@ import { PlanEditor } from './Plans';
 
 export function Coach() {
   const { userId, session, offlineAccess } = useAuth();
-  const { profile, plans, messages, proposals, sessions, run } = useApp();
+  const { profile, plans, messages, proposals, sessions, trainingDataReady, run } = useApp();
   const [text, setText] = useState(''); const [sending, setSending] = useState(false);
   const [mode, setMode] = useState<'checking' | 'sample' | 'chatgpt'>('checking');
   const [review, setReview] = useState<Proposal | null>(null);
@@ -30,7 +30,7 @@ export function Coach() {
     setSending(true); setText('');
     const user: Message = { id: uid(), role: 'user', text: content, createdAt: new Date().toISOString() };
     const saved = await run(async () => {
-      const adapter = mode === 'chatgpt' && userId && navigator.onLine ? liveCoach(userId) : sampleCoach;
+      const adapter = mode === 'chatgpt' && userId && navigator.onLine ? liveCoach(userId, trainingDataReady) : sampleCoach;
       const reply = await adapter.respond({ messages: [...messages, user], profile, plan: plans.find(p => p.active), recentWorkouts: sessions.filter(s => s.status === 'completed').slice(-5) });
       const assistant = assistantMessage(reply.text, adapter === sampleCoach ? 'sample' : 'chatgpt');
       const proposal: Proposal | null = reply.proposal ? { id: uid(), messageId: assistant.id, plan: reply.proposal, status: 'pending', baseRevision: reply.baseRevision ?? null } : null;
@@ -53,7 +53,7 @@ export function Coach() {
       });
     });
   }}><Plus size={21} /></button></div>
-    <div className="demo-banner"><span className="pill accent"><Sparkles size={13} />{mode === 'chatgpt' ? 'ChatGPT Coach' : 'Sample Coach'}</span><p>{mode === 'chatgpt' ? 'Using your connected ChatGPT plan. Replies are saved on this device.' : mode === 'checking' ? 'Checking your ChatGPT connection…' : 'Sample responses are available offline or without ChatGPT plan permission.'}</p></div>
+    <div className="demo-banner"><span className="pill accent"><Sparkles size={13} />{mode === 'chatgpt' ? 'ChatGPT Coach' : 'Sample Coach'}</span><p>{mode === 'chatgpt' ? `Using your connected ChatGPT plan. Replies are saved on this device. ${trainingDataReady ? 'Your synced training data is available to Coach.' : 'Your training data is still syncing; general questions are available.'}` : mode === 'checking' ? 'Checking your ChatGPT connection…' : 'Sample responses are available offline or without ChatGPT plan permission.'}</p></div>
     {messages.length === 0 && <div className="coach-welcome"><div className="orb"><Sparkles size={34} strokeWidth={1.5} /></div><h2>Training with<br />a little more intention.</h2><p>Build a routine. Understand the details.<br />Make the plan your own.</p><div className="conversation-starters">{(mode === 'chatgpt'
       ? [['How should I start training?', 'Get practical first steps'], ['Explain my plan', 'Understand your routine'], ['How should I recover?', 'Talk through rest and recovery']]
       : [['Build a sample plan', 'An editable starting point'], ['Explain my plan', 'Get to know your routine'], ['Change my rest periods', 'Preview a plan adjustment']]

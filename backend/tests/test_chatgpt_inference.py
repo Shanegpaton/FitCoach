@@ -4,7 +4,7 @@ import time
 import httpx
 import pytest
 
-from backend import chatgpt_inference as inference
+from backend.agent import inference
 
 
 @pytest.mark.asyncio
@@ -62,3 +62,60 @@ async def test_failed_stream_never_returns_partial_reply(monkeypatch):
     with pytest.raises(inference.InferenceError) as error:
         await inference.complete_response('secret-access', [{'role': 'user', 'text': 'Help'}], '')
     assert error.value.status == 429
+
+
+@pytest.mark.asyncio
+async def test_agent_turn_exposes_completed_function_call(monkeypatch):
+    call = {'type': 'function_call', 'name': 'get_training_profile',
+            'arguments': '{}', 'call_id': 'call-1'}
+    def respond(request):
+        if request.url.path == '/v1/models':
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+        body = json.loads(request.content)
+        assert body['store'] is False and body['stream'] is True
+        assert body['tools'][0]['name'] == 'get_training_profile'
+        assert body['parallel_tool_calls'] is False
+        assert body['input'] == [{'role': 'user', 'content': 'Explain my plan'}]
+        event = {'type': 'response.completed', 'response': {'output': [call]}}
+        return httpx.Response(200, text=f'data: {json.dumps(event)}\n\n')
+    real = httpx.AsyncClient
+    monkeypatch.setattr(inference.httpx, 'AsyncClient',
+        lambda **kwargs: real(transport=httpx.MockTransport(respond)))
+    result = await inference.complete_agent_turn('secret-access',
+        [{'role': 'user', 'content': 'Explain my plan'}],
+        [{'type': 'function', 'name': 'get_training_profile'}])
+    assert result == {'output': [call], 'text': ''}
+
+
+@pytest.mark.asyncio
+async def test_agent_turn_reads_final_text_after_tool_output(monkeypatch):
+    reply = {'type': 'message', 'content': [{'type': 'output_text', 'text': 'Follow your A/B plan.'}]}
+    input_items = [{'role': 'user', 'content': 'Explain my plan'},
+                   {'type': 'function_call', 'name': 'get_training_profile',
+                    'arguments': '{}', 'call_id': 'call-1'},
+                   {'type': 'function_call_output', 'call_id': 'call-1', 'output': '{"plan":"A/B"}'}]
+    def respond(request):
+        if request.url.path == '/v1/models':
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+        assert json.loads(request.content)['input'] == input_items
+        event = {'type': 'response.completed', 'response': {'output': [reply]}}
+        return httpx.Response(200, text=f'data: {json.dumps(event)}\n\n')
+    real = httpx.AsyncClient
+    monkeypatch.setattr(inference.httpx, 'AsyncClient',
+        lambda **kwargs: real(transport=httpx.MockTransport(respond)))
+    result = await inference.complete_agent_turn('secret-access', input_items, [])
+    assert result == {'output': [reply], 'text': 'Follow your A/B plan.'}
+
+
+@pytest.mark.asyncio
+async def test_agent_turn_rejects_incomplete_stream(monkeypatch):
+    def respond(request):
+        if request.url.path == '/v1/models':
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+        return httpx.Response(200, text='data: {"type":"response.output_text.delta","delta":"Partial"}\n\n')
+    real = httpx.AsyncClient
+    monkeypatch.setattr(inference.httpx, 'AsyncClient',
+        lambda **kwargs: real(transport=httpx.MockTransport(respond)))
+    with pytest.raises(inference.InferenceError) as error:
+        await inference.complete_agent_turn('secret-access', [{'role': 'user', 'content': 'Hi'}], [])
+    assert error.value.status == 502
