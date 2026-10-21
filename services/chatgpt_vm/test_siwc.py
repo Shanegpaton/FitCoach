@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import pytest
 
-from prototype.chatgpt_vm import siwc
+from services.chatgpt_vm import siwc
 
 
 def test_authorization_request_and_restart(tmp_path):

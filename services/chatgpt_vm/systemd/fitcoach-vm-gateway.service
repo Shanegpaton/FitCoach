@@ -12,7 +12,7 @@ SupplementaryGroups=fitcoach-browser
 Environment=HOME=/var/lib/fitcoach-auth
 EnvironmentFile=/etc/fitcoach-vm.env
 WorkingDirectory=/opt/fitcoach-vm
-ExecStart=/opt/fitcoach-vm/.venv/bin/python -m prototype.chatgpt_vm.gateway serve --storage /var/lib/fitcoach-auth/state
+ExecStart=/opt/fitcoach-vm/.venv/bin/python -m services.chatgpt_vm.gateway serve --storage /var/lib/fitcoach-auth/state
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

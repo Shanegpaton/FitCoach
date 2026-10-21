@@ -108,6 +108,77 @@ async def test_agent_turn_reads_final_text_after_tool_output(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_agent_turn_returns_refusal_text_instead_of_unsupported_reply(monkeypatch):
+    refusal = {'type': 'message', 'content': [{'type': 'refusal', 'refusal': 'I can’t help with that request.'}]}
+    def respond(request):
+        if request.url.path == '/v1/models':
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+        event = {'type': 'response.completed', 'response': {'output': [refusal]}}
+        return httpx.Response(200, text=f'data: {json.dumps(event)}\n\n')
+    real = httpx.AsyncClient
+    monkeypatch.setattr(inference.httpx, 'AsyncClient',
+        lambda **kwargs: real(transport=httpx.MockTransport(respond)))
+    result = await inference.complete_agent_turn('secret-access', [{'role': 'user', 'content': 'Help'}], [])
+    assert result == {'output': [refusal], 'text': 'I can’t help with that request.'}
+
+
+@pytest.mark.asyncio
+async def test_agent_turn_uses_streamed_text_when_completion_omits_output(monkeypatch):
+    def respond(request):
+        if request.url.path == '/v1/models':
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+        return httpx.Response(200, text='data: {"type":"response.output_text.delta","delta":"Train today."}\n\n'
+            'data: {"type":"response.completed","response":{"status":"completed","output":[]}}\n\n')
+    real = httpx.AsyncClient
+    monkeypatch.setattr(inference.httpx, 'AsyncClient',
+        lambda **kwargs: real(transport=httpx.MockTransport(respond)))
+    result = await inference.complete_agent_turn('secret-access', [{'role': 'user', 'content': 'Help'}], [])
+    assert result == {'output': [], 'text': 'Train today.'}
+
+
+@pytest.mark.asyncio
+async def test_agent_turn_uses_completed_stream_item_for_function_call(monkeypatch):
+    call = {'type': 'function_call', 'name': 'get_training_profile', 'arguments': '{}', 'call_id': 'call-1'}
+    def respond(request):
+        if request.url.path == '/v1/models':
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+        item = {'type': 'response.output_item.done', 'output_index': 0, 'item': call}
+        done = {'type': 'response.completed', 'response': {'status': 'completed', 'output': []}}
+        return httpx.Response(200, text=f'data: {json.dumps(item)}\n\ndata: {json.dumps(done)}\n\n')
+    real = httpx.AsyncClient
+    monkeypatch.setattr(inference.httpx, 'AsyncClient',
+        lambda **kwargs: real(transport=httpx.MockTransport(respond)))
+    result = await inference.complete_agent_turn('secret-access', [{'role': 'user', 'content': 'My profile'}],
+        [{'type': 'function', 'name': 'get_training_profile'}])
+    assert result == {'output': [call], 'text': ''}
+
+
+@pytest.mark.asyncio
+async def test_agent_turn_retries_empty_completed_response_once(monkeypatch):
+    attempts = 0
+    def respond(request):
+        nonlocal attempts
+        if request.url.path == '/v1/models':
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+        attempts += 1
+        body = json.loads(request.content)
+        if attempts == 1:
+            assert 'Produce a final text message' not in body['instructions']
+            output = [{'type': 'reasoning', 'encrypted_content': 'opaque'}]
+        else:
+            assert 'Produce a final text message' in body['instructions']
+            output = [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'Start gently.'}]}]
+        event = {'type': 'response.completed', 'response': {'status': 'completed', 'output': output}}
+        return httpx.Response(200, text=f'data: {json.dumps(event)}\n\n')
+    real = httpx.AsyncClient
+    monkeypatch.setattr(inference.httpx, 'AsyncClient',
+        lambda **kwargs: real(transport=httpx.MockTransport(respond)))
+    result = await inference.complete_agent_turn('secret-access', [{'role': 'user', 'content': 'Help'}], [])
+    assert result['text'] == 'Start gently.'
+    assert attempts == 2
+
+
+@pytest.mark.asyncio
 async def test_agent_turn_rejects_incomplete_stream(monkeypatch):
     def respond(request):
         if request.url.path == '/v1/models':

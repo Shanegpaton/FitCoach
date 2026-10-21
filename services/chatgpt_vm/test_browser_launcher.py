@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from prototype.chatgpt_vm import browser_launcher, siwc
+from services.chatgpt_vm import browser_launcher, siwc
 
 
 @pytest.mark.parametrize('url', [

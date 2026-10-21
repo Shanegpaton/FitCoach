@@ -1,5 +1,6 @@
 """Server-side ChatGPT plan inference. OAuth credentials never leave the API."""
 import json
+import logging
 import time
 
 import httpx
@@ -10,6 +11,7 @@ except ImportError:
     from chatgpt_credentials import ISSUER
 
 RESOURCE = 'https://api.openai.com/v1'
+logger = logging.getLogger(__name__)
 
 
 class InferenceError(Exception):
@@ -113,7 +115,7 @@ async def complete_response(access_token: str, messages: list[dict], context: st
 
 
 async def complete_agent_turn(access_token: str, input_items: list[dict], tools: list[dict],
-                              training_data_ready: bool = True) -> dict:
+                              training_data_ready: bool = True, *, _empty_retry: bool = False) -> dict:
     """Return one completed model turn, including any function-call output items."""
     headers = {'Authorization': f'Bearer {access_token}'}
     try:
@@ -137,11 +139,17 @@ async def complete_agent_turn(access_token: str, input_items: list[dict], tools:
                                  + ('Training data is synchronized and database tools are available. '
                                     if training_data_ready else
                                     'Training data is still syncing. Answer general questions, but tell the user '
-                                    'to wait for sync before answering about their profile, plans, exercises, or history. ')),
+                                    'to wait for sync before answering about their profile, plans, exercises, or history. ')
+                                 + ('Produce a final text message or call one available function now. '
+                                    if _empty_retry else '')),
                 'input': input_items, 'tools': tools, 'parallel_tool_calls': False,
                 'include': ['reasoning.encrypted_content'],
             }
             completed = None
+            completion_received = False
+            streamed_text = []
+            finalized_text = []
+            completed_items = {}
             async with client.stream('POST', f'{RESOURCE}/responses', headers=headers, json=payload) as response:
                 if response.status_code == 401:
                     raise InferenceError(401, 'ChatGPT connection expired. Reconnect in Settings.')
@@ -160,10 +168,30 @@ async def complete_agent_turn(access_token: str, input_items: list[dict], tools:
                         continue
                     kind = event.get('type')
                     if kind == 'response.output_text.delta':
-                        length += len(event.get('delta', ''))
+                        delta = event.get('delta', '')
+                        if isinstance(delta, str):
+                            streamed_text.append(delta)
+                            length += len(delta)
                         if length > 10000:
                             raise InferenceError(502, 'ChatGPT reply was too long. Try a shorter question.')
+                    elif kind == 'response.refusal.delta':
+                        delta = event.get('delta', '')
+                        if isinstance(delta, str):
+                            streamed_text.append(delta)
+                            length += len(delta)
+                        if length > 10000:
+                            raise InferenceError(502, 'ChatGPT reply was too long. Try a shorter question.')
+                    elif kind == 'response.output_text.done' and isinstance(event.get('text'), str):
+                        finalized_text.append(event['text'])
+                    elif kind == 'response.refusal.done' and isinstance(event.get('refusal'), str):
+                        finalized_text.append(event['refusal'])
+                    elif kind == 'response.output_item.done':
+                        item = event.get('item')
+                        index = event.get('output_index')
+                        if isinstance(index, int) and isinstance(item, dict):
+                            completed_items[index] = item
                     elif kind == 'response.completed':
+                        completion_received = True
                         completed = event.get('response')
                     elif kind == 'response.failed':
                         error = (event.get('response') or {}).get('error') or {}
@@ -173,17 +201,40 @@ async def complete_agent_turn(access_token: str, input_items: list[dict], tools:
                         raise InferenceError(502, 'ChatGPT could not complete this reply. Try again.')
                     elif kind == 'response.incomplete':
                         raise InferenceError(502, 'ChatGPT reply was incomplete. Try again.')
+            if not completion_received:
+                raise InferenceError(502, 'ChatGPT did not complete a reply. Try again.')
             output = completed.get('output') if isinstance(completed, dict) else None
             if not isinstance(output, list):
-                raise InferenceError(502, 'ChatGPT did not complete a reply. Try again.')
+                output = []
+            if completed_items and not any(
+                isinstance(item, dict) and (
+                    item.get('type') == 'function_call' or
+                    (item.get('type') == 'message' and any(
+                        isinstance(part, dict) and part.get('type') in ('output_text', 'refusal')
+                        for part in (item.get('content') or [])))
+                ) for item in output
+            ):
+                output = [completed_items[index] for index in sorted(completed_items)]
             calls = [item for item in output if isinstance(item, dict) and item.get('type') == 'function_call']
             text = ''.join(content.get('text', '')
                            for item in output if isinstance(item, dict) and item.get('type') == 'message'
                            for content in item.get('content', [])
                            if isinstance(content, dict) and content.get('type') == 'output_text').strip()
+            refusal = ''.join(content.get('refusal', '')
+                              for item in output if isinstance(item, dict) and item.get('type') == 'message'
+                              for content in item.get('content', [])
+                              if isinstance(content, dict) and content.get('type') == 'refusal').strip()
+            text = text or refusal or ''.join(finalized_text).strip() or ''.join(streamed_text).strip()
             if len(text) > 10000:
                 raise InferenceError(502, 'ChatGPT reply was too long. Try a shorter question.')
             if not calls and not text:
+                logger.warning('Empty completed Coach response: model=%s status=%s output_types=%s response_id=%s',
+                    model, completed.get('status') if isinstance(completed, dict) else None,
+                    [item.get('type') for item in output if isinstance(item, dict)],
+                    completed.get('id') if isinstance(completed, dict) else None)
+                if not _empty_retry:
+                    return await complete_agent_turn(access_token, input_items, tools,
+                        training_data_ready, _empty_retry=True)
                 raise InferenceError(502, 'ChatGPT returned an unsupported reply. Try again.')
             return {'output': output, 'text': text}
     except InferenceError:

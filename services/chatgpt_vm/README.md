@@ -1,18 +1,18 @@
-# VM browser sign-in proof
+# VM browser sign-in service
 
-This prototype gives one FitCoach account at a time an exclusive five-minute session on a shared VM. The authenticated API controls the VM; the PWA connects only to its protected viewer relay. OAuth runs **inside the VM whose browser the iPhone user controls**. Opening the authorization URL in iPhone Safari would direct `127.0.0.1` to the phone and cannot complete this flow.
+This service gives one FitCoach account at a time an exclusive five-minute session on a shared VM. The authenticated API controls the VM; the PWA connects only to its protected viewer relay. OAuth runs **inside the VM whose browser the iPhone user controls**. Opening the authorization URL in iPhone Safari would direct `127.0.0.1` to the phone and cannot complete this flow.
 
 ## Run on a disposable VM
 
 Install a graphical browser and provide an authenticated HTTPS remote browser session that the iPhone can control. Do not enable browser-session recording. Use a fresh, single-user VM and protect its filesystem from other users.
 
-For the current Oracle Ubuntu prototype, the live Python code and virtual environment are root-owned under
+For the current Oracle Ubuntu deployment, the live Python code and virtual environment are root-owned under
 `/opt/fitcoach-vm`. A Firefox desktop runs as the unprivileged `fitcoach-browser` user, with no sudo access, and is served by TigerVNC on
 `127.0.0.1:5901` and noVNC on `127.0.0.1:6080`; neither port should be opened in
 the VCN security list. The PWA embeds a noVNC client and connects to the gateway's
 authenticated WebSocket relay at `/v1/viewer`. Open TCP 80 and 443 in the Oracle VCN security
 list and host firewall, then start Caddy so it can obtain a trusted certificate.
-Do not expose the raw noVNC endpoint. The VM is an E5 paid shape, so stop it when the prototype is
+Do not expose the raw noVNC endpoint. The VM is an E5 paid shape, so stop it when the service is
 idle and account for persistent boot-volume charges.
 The loopback desktop is managed by `fitcoach-vnc.service` and `fitcoach-novnc.service` in
 [`systemd/`](systemd/). `fitcoach-browser-launcher.service` opens only approved OpenAI authorization URLs.
@@ -61,9 +61,9 @@ The training API and account sync remain separate.
 From the iPhone, control the **VM browser** and finish OpenAI consent. The protected OAuth process waits five minutes for a one-use `http://127.0.0.1:<port>/auth/callback` request. It then exchanges the code with the issued client ID and verifies the signed ID token through OpenAI’s JWKS. Tokens and the stable opaque host ID stay in the protected state directory. The browser receives the OpenAI page and callback response, never the token JSON. Do not capture the authorization URL, browser session, terminal output, or credential files in diagnostics. The VM serves accounts sequentially; it does not isolate simultaneous Firefox desktops.
 
 ```bash
-sudo -u fitcoach-auth HOME=/var/lib/fitcoach-auth .venv/bin/python -m prototype.chatgpt_vm.siwc status --storage /var/lib/fitcoach-auth/state
-sudo -u fitcoach-auth HOME=/var/lib/fitcoach-auth .venv/bin/python -m prototype.chatgpt_vm.siwc disconnect --storage /var/lib/fitcoach-auth/state
-.venv/bin/python -m pytest -q prototype/chatgpt_vm/test_siwc.py prototype/chatgpt_vm/test_browser_launcher.py
+sudo -u fitcoach-auth HOME=/var/lib/fitcoach-auth .venv/bin/python -m services.chatgpt_vm.siwc status --storage /var/lib/fitcoach-auth/state
+sudo -u fitcoach-auth HOME=/var/lib/fitcoach-auth .venv/bin/python -m services.chatgpt_vm.siwc disconnect --storage /var/lib/fitcoach-auth/state
+.venv/bin/python -m pytest -q services/chatgpt_vm/test_siwc.py services/chatgpt_vm/test_browser_launcher.py
 ```
 
 Successful local tests do not prove the iPhone to VM browser route or OpenAI authorization. Document a real iPhone run's callback, successful code exchange, validated identity, and granted scopes without recording the browser session or tokens. Stop the product integration if this gate fails. Before offering this flow to other users, confirm with OpenAI that FitCoachGPT-operated VMs are eligible for the open-source plan-usage flow; [OpenAI’s overview](https://developers.openai.com/siwc/token-sharing-open-source) directs remotely hosted apps to its interest process.

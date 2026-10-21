@@ -1,5 +1,5 @@
 [Unit]
-Description=FitCoachGPT prototype private VM desktop
+Description=FitCoachGPT private VM desktop
 After=network.target
 
 [Service]

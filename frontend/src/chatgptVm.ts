@@ -1,6 +1,7 @@
 import { getSyncAccessToken } from './auth';
 import type { ChatAdapter } from './coach';
 import { db, syncStateId } from './db';
+import { errorMessage } from './errors';
 
 export const chatgptVmUrl = (import.meta.env.VITE_CHATGPT_VM_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 const apiUrl = (import.meta.env.VITE_FITCOACH_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
@@ -35,8 +36,8 @@ export async function backendChatGPTRequest<T>(userId: string, path: string, ini
   let response = await send(false);
   if (response.status === 401) response = await send(true);
   if (!response.ok) {
-    const body = await response.json().catch(() => ({})) as { detail?: string };
-    throw new Error(body.detail ?? `ChatGPT storage request failed (${response.status}).`);
+    const body: unknown = await response.json().catch(() => ({}));
+    throw new Error(errorMessage(body, `ChatGPT storage request failed (${response.status}).`));
   }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }

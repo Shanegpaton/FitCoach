@@ -1,5 +1,5 @@
 [Unit]
-Description=FitCoachGPT prototype noVNC loopback gateway
+Description=FitCoachGPT noVNC loopback gateway
 After=fitcoach-vnc.service
 Requires=fitcoach-vnc.service
 

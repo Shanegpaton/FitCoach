@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 import pytest
 
-from prototype.chatgpt_vm import gateway, siwc
+from services.chatgpt_vm import gateway, siwc
 
 
 class FakeProcess:

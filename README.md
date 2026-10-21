@@ -1,8 +1,8 @@
 # FitCoachGPT
 
-## ChatGPT connection experiment
+## ChatGPT VM connection
 
-Settings contains an experimental [ChatGPT VM connection](prototype/chatgpt_vm/README.md). The authenticated API starts a five-minute exclusive VM session for a FitCoach account; no operator pairing code is needed. The PWA controls the protected VM browser and shows the verified ChatGPT account and whether plan usage was granted. After sign-in, the API retrieves a one-use handoff, stores encrypted credentials in the account-scoped Supabase PostgreSQL backend, and asks the VM to delete its temporary credentials and Firefox profile. The PWA receives only connection status and a short-lived viewer token. With granted plan usage, Coach sends online requests through the authenticated API; the API refreshes tokens and calls the Responses API. Offline or disconnected Coach uses labeled sample responses. OpenAI eligibility for FitCoachGPT-operated VMs needs confirmation before broader release.
+Settings contains the [ChatGPT VM connection](services/chatgpt_vm/README.md). The authenticated API starts a five-minute exclusive VM session for a FitCoach account; no operator pairing code is needed. The PWA controls the protected VM browser and shows the verified ChatGPT account and whether plan usage was granted. After sign-in, the API retrieves a one-use handoff, stores encrypted credentials in the account-scoped Supabase PostgreSQL backend, and asks the VM to delete its temporary credentials and Firefox profile. The PWA receives only connection status and a short-lived viewer token. With granted plan usage, Coach sends online requests through the authenticated API; the API refreshes tokens and calls the Responses API. Offline or disconnected Coach uses labeled sample responses. OpenAI eligibility for FitCoachGPT-operated VMs needs confirmation before broader release.
 
 FitCoachGPT is a phone-first workout planner and tracker. Build a routine, log your sets, and see your progress in a dark, installable Progressive Web App (PWA).
 
@@ -96,7 +96,7 @@ VITE_FITCOACH_API_URL=https://YOUR_API_HOST npm run test:e2e
 
 Browser tests use installed Google Chrome for desktop and Android-sized emulation, plus Playwright WebKit for iPhone-sized emulation. They cover onboarding, offline logging and reload recovery, proposals, supersets, timers, custom exercises, real history, and backups. Physical iOS/Android installation and device alert behavior should also be checked before release.
 
-### ChatGPT connection prototype
+### ChatGPT VM service
 
 Settings can reserve the Oracle VM for one FitCoach account at a time and display its Firefox
 sign-in browser inside the PWA. The user completes OpenAI sign-in and permission
@@ -107,7 +107,7 @@ handoff moves verified credentials to the encrypted backend store. The backend t
 the VM session. The PWA receives only connection status and a short-lived viewer token.
 The production build sets `VITE_CHATGPT_VM_URL` to the public VM HTTPS origin in
 `frontend/.env.production`; override it in the frontend deployment if the VM moves. See
-[the VM prototype guide](prototype/chatgpt_vm/README.md) for service setup and
+[the ChatGPT VM service guide](services/chatgpt_vm/README.md) for service setup and
 release gates.
 
 ## Relational training API

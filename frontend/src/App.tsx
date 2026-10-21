@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link, Navigate, NavLink, Route, Routes, useLocation } from 'react-router';
-import { Activity, ArrowUpRight, Check, Dumbbell, History as HistoryIcon, LayoutGrid, LogOut, Settings as SettingsIcon, Sparkles, WifiOff, X } from 'lucide-react';
+import { Activity, AlertCircle, ArrowUpRight, Check, Dumbbell, History as HistoryIcon, LayoutGrid, LogOut, Settings as SettingsIcon, Sparkles, WifiOff, X } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { ZodError } from 'zod';
 import { activateUserDatabase, db, hasLegacyData, importLegacyData, initialize } from './db';
@@ -9,6 +9,7 @@ import { AppContext, type AppData } from './state';
 import { getSyncAccessToken, useAuth } from './auth';
 import { startSyncCoordinator, type SyncStatus } from './sync';
 import { Modal } from './ui';
+import { errorMessage } from './errors';
 import { Today } from './pages/Today';
 import { Plans } from './pages/Plans';
 import { WorkoutPage } from './pages/Workout';
@@ -77,7 +78,7 @@ export function App() {
   const notify = (message: string, error = false) => setToast({ message, error });
   const run = async (action: () => Promise<unknown>, success?: string) => {
     try { await action(); if (success) notify(success); return true; }
-    catch (error) { notify(error instanceof ZodError ? error.issues[0]?.message ?? 'Check the entered values.' : error instanceof Error ? error.message : 'Could not save. Your changes have not been saved.', true); return false; }
+    catch (error) { notify(error instanceof ZodError ? error.issues[0]?.message ?? 'Check the entered values.' : errorMessage(error, 'Could not save. Your changes have not been saved.'), true); return false; }
   };
   const finishLegacyReview = () => {
     if (legacyImportRunning.current || !auth.userId) return;
@@ -141,7 +142,7 @@ export function App() {
           return <NavLink key={String(to)} to={String(to)} end={to === '/'} className={({ isActive }) => isActive ? 'active' : ''}><Component size={21} /><span>{String(label)}</span></NavLink>;
         })}
       </nav>
-      {toast && <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <X size={18} /> : <Check size={18} />}<span>{toast.message}</span><button aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={16} /></button></div>}
+      {toast && <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <AlertCircle size={18} aria-hidden="true" /> : <Check size={18} aria-hidden="true" />}<span>{toast.message}</span><button type="button" aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={16} aria-hidden="true" /></button></div>}
       {!data.profile.onboardingDone && <Onboarding />}
       {legacyAvailable && !migrationSeen && <Modal title="Import this device’s training data?" onClose={finishLegacyReview}><p>FitCoach found data from before sign-in was added. Import it into this Google account to keep using your existing plans, profile, and workout history.</p><p className="field-hint">The original local data is kept. Importing replaces data in this account if it already has any.</p>{legacyImportError && <p className="auth-error" role="alert">Import failed: {legacyImportError}</p>}<div className="action-row"><button className="button secondary" disabled={importingLegacy} onClick={finishLegacyReview}>Keep accounts separate</button><button className="button primary" disabled={importingLegacy} onClick={() => void importLegacy()}>{importingLegacy ? 'Importing…' : 'Import data'}</button></div></Modal>}
     </div>

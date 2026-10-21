@@ -14,7 +14,7 @@ Environment=XDG_RUNTIME_DIR=/run/fitcoach-browser-session
 WorkingDirectory=/opt/fitcoach-vm
 RuntimeDirectory=fitcoach-browser
 RuntimeDirectoryMode=0770
-ExecStart=/opt/fitcoach-vm/.venv/bin/python -m prototype.chatgpt_vm.browser_launcher
+ExecStart=/opt/fitcoach-vm/.venv/bin/python -m services.chatgpt_vm.browser_launcher
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

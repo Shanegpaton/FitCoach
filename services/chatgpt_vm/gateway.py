@@ -1,4 +1,4 @@
-"""Exclusive-lease VM gateway for the FitCoachGPT sign-in prototype."""
+"""Exclusive-lease VM gateway for the FitCoachGPT sign-in service."""
 from __future__ import annotations
 
 import hashlib
@@ -162,7 +162,7 @@ class Gateway:
     def _launch_process(storage: Path) -> subprocess.Popen:
         env = os.environ.copy()
         env['FITCOACH_VM_BROWSER_SOCKET'] = '/run/fitcoach-browser/launch.sock'
-        return subprocess.Popen([sys.executable, '-m', 'prototype.chatgpt_vm.siwc',
+        return subprocess.Popen([sys.executable, '-m', 'services.chatgpt_vm.siwc',
                                  'sign-in', '--storage', str(storage)],
                                 cwd=Path(__file__).resolve().parents[2], env=env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -245,7 +245,7 @@ class Gateway:
 
 
 def create_app(gateway: Gateway) -> FastAPI:
-    app = FastAPI(title='FitCoachGPT VM sign-in prototype', docs_url=None, redoc_url=None)
+    app = FastAPI(title='FitCoachGPT VM sign-in service', docs_url=None, redoc_url=None)
     app.add_middleware(CORSMiddleware, allow_origins=gateway.pwa_origins,
                        allow_methods=['GET', 'POST', 'DELETE'], allow_headers=['Authorization', 'Content-Type'])
 
