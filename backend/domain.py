@@ -88,6 +88,7 @@ class Workout(Document):
 class Plan(Document):
     id: ID
     name: Name
+    description: str = Field(default='', max_length=2000)
     schedule: Literal['week', 'rotation']
     cursor: int = Field(strict=True, ge=0)
     revision: int = Field(strict=True, ge=0)

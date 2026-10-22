@@ -57,11 +57,11 @@ Today, Plan, Coach, and History are the four primary tabs. Weight progression is
 
 ### Coach in this milestone
 
-Coach uses ChatGPT for freeform conversation when the signed-in account has granted ChatGPT plan usage and the API is reachable. Replies are labeled ChatGPT and saved only on that device. Without the grant or while offline, Coach uses labeled sample responses and editable sample plan proposals. Review and apply a proposal to save it; proposals do not change your plan automatically. Live replies do not create or edit plans. The typed `ChatAdapter` in `frontend/src/coach.ts` keeps the two modes separate.
+Coach uses ChatGPT for freeform conversation when the signed-in account has granted ChatGPT plan usage and the API is reachable. Replies are labeled ChatGPT and saved only on that device. Without the grant or while offline, Coach uses labeled sample responses and editable sample plan proposals. Review and apply a proposal to save it; proposals do not change your plan automatically. Live replies can create durable server-backed plan proposals using account-scoped plans, exercise definitions, profile information, and recorded performance. The Coach renders the structured preview and requires explicit approval or rejection. Approval is online-only and requires a clean local sync state; the API rechecks account ownership and source ETag before applying the plan through the same aggregate writer used by sync. Offline sample proposals remain device-local. The typed `ChatAdapter` in `frontend/src/coach.ts` keeps the two modes separate.
 
 The PWA does not currently call Ollama or the Python backend. That existing backend and its scientific corpus remain available separately below.
 
-The authenticated Coach API runs each live reply through a bounded LangGraph model/tool loop in `backend/agent/`. FastAPI validates the request with Pydantic. Read-only tools in `backend/agent/tools/` can search account-scoped workout history across dates and recorded exercise names, inspect full session snapshots, and read profile, plans, and exercises. The PWA enables those tools after account data has synchronized; while sync is pending, live Coach can still answer general questions. A request such as “How was my bench press one year ago?” searches a window around that date and uses actual logged sets. The PWA's sample mode and independent Python RAG backend are unchanged.
+The authenticated Coach API runs each live reply through a bounded LangGraph model/tool loop in `backend/agent/`. FastAPI validates the request with Pydantic. Read-only tools in `backend/agent/tools/` can search account-scoped workout history across dates and recorded exercise names, inspect full session snapshots, and read profile, plans, and exercises. Typed proposal tools create reviewable plan previews and do not alter plan aggregates. The PWA enables those tools after account data has synchronized; while sync is pending, live Coach can still answer general questions. A request such as “How was my bench press one year ago?” searches a window around that date and uses actual logged sets. The PWA's sample mode and independent Python RAG backend are unchanged.
 
 ### Install and test on a phone
 
@@ -122,7 +122,7 @@ pip install -r backend/requirements-dev.txt
 
 Follow [the API setup and verification guide](backend/README.md) to provision a restricted runtime role, configure separate runtime/migration connection URLs, apply Alembic migrations, start Uvicorn, and make authenticated requests. Hosted PostgreSQL connections require TLS; use Supabase's direct connection or its session pooler for IPv4 environments. The guide also describes disposable PostgreSQL and Supabase development migration tests.
 
-The API starts without loading embeddings or Ollama. The API can deploy as a Vercel Python Function with `backend/` as its project root; see [the Vercel deployment steps](backend/README.md#deploy-the-api-on-vercel). Live ChatGPT Coach replies are available to connected accounts through a bounded LangGraph model/tool loop; conversation and proposal synchronization and automatic anonymous-data import remain deferred. Backend availability does not gate local workout entry. Multiple active sessions are allowed in the cloud so simultaneous offline workouts from different devices cannot reject one another's recorded sets.
+The API starts without loading embeddings or Ollama. The API can deploy as a Vercel Python Function with `backend/` as its project root; see [the Vercel deployment steps](backend/README.md#deploy-the-api-on-vercel). Live ChatGPT Coach replies are available to connected accounts through a bounded LangGraph model/tool loop; conversations remain device-local; live Coach plan proposals are persisted per account for approval across requests. Backend availability does not gate local workout entry. Multiple active sessions are allowed in the cloud so simultaneous offline workouts from different devices cannot reject one another's recorded sets.
 
 ## Python RAG Backend
 
@@ -256,7 +256,7 @@ backend/                     Independent FastAPI relational training API
   agent/                    Coach graph and model inference
     graph.py                Bounded model/tool loop
     inference.py            ChatGPT Responses API calls
-    tools/                  Read-only Coach tools
+    tools/                  Account-scoped Coach tools and proposal generation
   index.py                   Vercel FastAPI entry point
   requirements.txt           API function dependencies
   vercel.json                API function bundle configuration

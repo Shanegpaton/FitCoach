@@ -1,4 +1,4 @@
-"""Allowlisted, account-scoped read tools for Coach. Model arguments never become SQL."""
+"""Allowlisted account-scoped Coach tools. Model arguments never become SQL."""
 
 import base64
 import binascii
@@ -23,6 +23,9 @@ except ImportError:  # backend/ as the deployment project root
     from store import Store
 
 from ..inference import InferenceError
+from ...domain import Plan
+from ..plan_proposal_service import CreateRequest, ModifyRequest, create_proposal, modify_proposal
+from ..plan_proposals import operations_adapter
 
 MAX_RESULT_CHARS = 24_000
 MAX_PAGE_OFFSET = 5_000
@@ -71,6 +74,48 @@ TOOL_SPECS = [
         'ids': _strings(), 'names': _strings(), 'custom': _nullable('boolean'),
         'limit': {'type': 'integer'}, 'cursor': _nullable('string')}),
 ]
+
+# These schemas reuse the exact persisted Plan and discriminated operation models.
+# Tool payloads are validated again in the proposal service before any record is stored.
+_plan_schema = Plan.model_json_schema(ref_template='#/$defs/{model}')
+_ops_schema = operations_adapter.json_schema()
+
+
+def _responses_schema(value):
+    if isinstance(value, list):
+        return [_responses_schema(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {key: _responses_schema(item) for key, item in value.items()
+              if key not in ('discriminator', 'default', 'title')}
+    if 'const' in result:
+        result['enum'] = [result.pop('const')]
+    if 'oneOf' in result:
+        result['anyOf'] = result.pop('oneOf')
+    return result
+
+
+_plan_schema = _responses_schema(_plan_schema)
+_ops_schema = _responses_schema(_ops_schema)
+if 'description' not in _plan_schema.get('required', []):
+    _plan_schema.setdefault('required', []).append('description')
+def _typed_spec(name, description, properties, required, definitions):
+    return {'type': 'function', 'name': name, 'description': description, 'strict': True,
+        'parameters': {'type': 'object', 'properties': properties, 'required': required,
+                       'additionalProperties': False, '$defs': definitions}}
+
+
+TOOL_SPECS.extend([
+    _typed_spec('propose_training_plan', 'Create and validate a complete new plan preview. This tool does not save the plan.', {
+        'plan': {key: value for key, value in _plan_schema.items() if key != '$defs'},
+        'assumptions': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 10}},
+        ['plan', 'assumptions'], _plan_schema.get('$defs', {})),
+    _typed_spec('propose_plan_changes', 'Propose typed operations against one of the user’s plans. This tool does not save changes.', {
+        'planId': {'type': 'string'}, 'operations': {'type': 'array',
+            'items': {key: value for key, value in _ops_schema.items() if key != '$defs'}, 'minItems': 1, 'maxItems': 20},
+        'assumptions': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 10}},
+        ['planId', 'operations', 'assumptions'], _ops_schema.get('$defs', {})),
+])
 
 
 class ToolArgs(BaseModel):
@@ -199,6 +244,8 @@ ARG_MODELS = {
     'search_training_plans': PlanSearch,
     'get_training_plans': RecordIds,
     'search_exercises': ExerciseSearch,
+    'propose_training_plan': CreateRequest,
+    'propose_plan_changes': ModifyRequest,
 }
 
 
@@ -398,7 +445,13 @@ async def _search_exercises(data: Store, args: ExerciseSearch):
 
 
 async def run_database_tool(name: str, arguments: str, database, user_id: UUID, today: date) -> str:
-    """Validate model arguments, then execute one short read-only account transaction."""
+    """Validate model arguments, then read account data or store a proposal draft."""
+    if name == 'propose_training_plan':
+        result = await create_proposal(database, user_id, arguments)
+        return json.dumps(jsonable_encoder(result), separators=(',', ':'), allow_nan=False)
+    if name == 'propose_plan_changes':
+        result = await modify_proposal(database, user_id, arguments)
+        return json.dumps(jsonable_encoder(result), separators=(',', ':'), allow_nan=False)
     model = ARG_MODELS.get(name)
     if model is None:
         raise InferenceError(502, 'Coach requested an unsupported tool. Try again.')
@@ -428,6 +481,6 @@ async def run_database_tool(name: str, arguments: str, database, user_id: UUID, 
             else:
                 result = await _search_exercises(data, args)
     output = json.dumps(jsonable_encoder(result), separators=(',', ':'), allow_nan=False)
-    if len(output) > MAX_RESULT_CHARS:
+    if len(output.encode('utf-8')) > MAX_RESULT_CHARS:
         return json.dumps({'error': 'Result too large; narrow the filters or request fewer records.'})
     return output

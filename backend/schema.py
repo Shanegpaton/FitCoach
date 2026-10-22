@@ -84,9 +84,9 @@ exercise_catalog = sa.Table('exercise_catalog', metadata, col('client_id', sa.Te
     *exercise_fields(), sa.PrimaryKeyConstraint('client_id'), *exercise_checks())
 exercises = owned('exercises', col('catalog_id', sa.Text, True), *exercise_fields(), constraints=[
     sa.ForeignKeyConstraint(['catalog_id'], ['fitcoach.exercise_catalog.client_id']), *exercise_checks()])
-training_plans = owned('training_plans', col('name', sa.Text), col('schedule', sa.Text),
+training_plans = owned('training_plans', col('name', sa.Text), col('description', sa.Text), col('schedule', sa.Text),
     col('cursor', sa.Integer), col('revision', sa.Integer), col('active', sa.Boolean), constraints=[
-        check('name', 'length(btrim(name)) BETWEEN 1 AND 100'), check('schedule', "schedule IN ('week', 'rotation')"),
+        check('name', 'length(btrim(name)) BETWEEN 1 AND 100'), check('description', 'length(description) <= 2000'), check('schedule', "schedule IN ('week', 'rotation')"),
         check('cursor', 'cursor >= 0'), check('revision', 'revision >= 0')])
 sa.Index('uq_training_plans_active', training_plans.c.user_id, unique=True,
          postgresql_where=sa.and_(training_plans.c.active, training_plans.c.deleted_at.is_(None)))

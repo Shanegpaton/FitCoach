@@ -27,6 +27,7 @@ if __package__:
     from .agent import inference
     from .agent.graph import build_coach_graph
     from .agent.tools.database import TOOL_SPECS, run_database_tool
+    from .agent.plan_proposal_service import approve_proposal, read_proposal, reject_proposal
     from .store import RESOURCES, Store, etag
 else:
     from auth import AuthVerifier, identity
@@ -38,6 +39,7 @@ else:
     from agent import inference
     from agent.graph import build_coach_graph
     from agent.tools.database import TOOL_SPECS, run_database_tool
+    from agent.plan_proposal_service import approve_proposal, read_proposal, reject_proposal
     from store import RESOURCES, Store, etag
 
 User = Annotated[UUID, Depends(identity)]
@@ -347,7 +349,19 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
             })
         except inference.InferenceError as exc:
             raise HTTPException(exc.status, exc.message) from None
-        return {'text': result['text']}
+        return {'text': result['text'], 'proposal': result.get('proposal')}
+
+    @app.get('/v1/coach/proposals/{proposal_id}')
+    async def coach_proposal(proposal_id: UUID, user: User):
+        return await read_proposal(database, user, proposal_id)
+
+    @app.post('/v1/coach/proposals/{proposal_id}/reject')
+    async def coach_reject(proposal_id: UUID, user: User):
+        return await reject_proposal(database, user, proposal_id)
+
+    @app.post('/v1/coach/proposals/{proposal_id}/approve')
+    async def coach_approve(proposal_id: UUID, user: User):
+        return await approve_proposal(database, user, proposal_id)
 
     @app.get('/v1/sync/changes')
     async def sync_changes(user: User, cursor: Annotated[int, Query(ge=0)] = 0,

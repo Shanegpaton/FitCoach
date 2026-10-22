@@ -25,11 +25,15 @@ export interface ChatGPTAttempt {
 }
 
 export async function backendChatGPTRequest<T>(userId: string, path: string, init: RequestInit = {}): Promise<T> {
+  return backendRequest<T>(userId, `chatgpt/${path}`, init);
+}
+
+export async function backendRequest<T>(userId: string, path: string, init: RequestInit = {}): Promise<T> {
   if (!apiUrl) throw new Error('The training API is not configured.');
   const send = async (refresh: boolean) => {
     const token = await getSyncAccessToken(refresh, userId);
     if (!token) throw new Error('Sign in online to connect ChatGPT.');
-    return fetch(`${apiUrl}/v1/chatgpt/${path}`, {
+    return fetch(`${apiUrl}/v1/${path}`, {
       ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${token}` }, cache: 'no-store',
     });
   };
@@ -55,11 +59,11 @@ export function liveCoach(userId: string, syncReady: boolean): ChatAdapter {
     const trainingDataReady = syncReady && state?.bootstrapComplete === true && pending === 0 && conflicts === 0;
     const now = new Date();
     const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const reply = await backendChatGPTRequest<{ text: string }>(userId, 'coach', {
+    const reply = await backendChatGPTRequest<{ text: string; proposal?: import('./coach').ServerPlanProposal | null }>(userId, 'coach', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: messages.slice(-16).map(message => ({ role: message.role, text: message.text.slice(0, 5000) })),
         localDate, trainingDataReady }),
     });
-    return { text: reply.text };
+    return { text: reply.text, serverProposal: reply.proposal ?? null };
   } };
 }

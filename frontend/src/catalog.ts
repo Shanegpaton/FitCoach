@@ -25,7 +25,7 @@ export function starterPlan(profile: Profile): Plan {
   const blocks = (ids: string[]) => ids.map(id => newBlock(`ex-${id}`));
   const days = profile.trainingDays.length ? profile.trainingDays : [1, 3, 5];
   return {
-    id: uid(), name: 'Full body foundations', schedule: 'week', cursor: 0, revision: 0, active: false,
+    id: uid(), name: 'Full body foundations', description: '', schedule: 'week', cursor: 0, revision: 0, active: false,
     workouts: [
       { id: uid(), name: 'Full body A', days: days.filter((_, index) => index % 2 === 0),
         blocks: blocks(bodyweight ? ['pushup', 'pullup'] : gym ? ['squat', 'bench', 'row'] : ['press', 'row', 'curl']) },

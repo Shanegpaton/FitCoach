@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -47,6 +49,39 @@ async def test_tool_result_returns_to_model():
                                        'call_id': 'call-1', 'output': '{"profile":{"goals":"Strength"}}'}]
     assert result['tool_calls'] == 1
     assert any(spec['name'] == call['name'] for spec in TOOL_SPECS)
+
+
+@pytest.mark.asyncio
+async def test_plan_proposal_tool_returns_reviewable_payload_without_approval_tools():
+    proposal = {'id': 'proposal-1', 'type': 'create', 'status': 'pending', 'plan': {'id': 'plan-1'}}
+    count = 0
+    async def respond(_):
+        nonlocal count
+        count += 1
+        if count == 1:
+            return {'output': [{'type': 'function_call', 'name': 'propose_training_plan',
+                'arguments': '{"plan":{}}', 'call_id': 'proposal-call'}], 'text': ''}
+        return {'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'Review this structured plan.'}]}],
+                'text': 'Review this structured plan.'}
+    async def run_tool(name, arguments):
+        assert name == 'propose_training_plan' and 'plan' in arguments
+        return json.dumps({'proposal': proposal, 'summary': 'New plan'})
+    result = await build_coach_graph(respond, run_tool).ainvoke({'input': [{'role': 'user', 'content': 'Build me a plan'}]})
+    assert result['proposal'] == proposal
+    assert result['text'] == 'Review this structured plan.'
+    assert 'approve_training_plan' not in {tool['name'] for tool in TOOL_SPECS}
+
+
+@pytest.mark.asyncio
+async def test_second_proposal_in_one_request_is_rejected():
+    count = 0
+    async def respond(_):
+        nonlocal count
+        count += 1
+        return {'output': [{'type': 'function_call', 'name': 'propose_training_plan', 'arguments': '{}', 'call_id': str(count)}], 'text': ''}
+    async def run_tool(*_): return '{"proposal":{"id":"persisted"}}'
+    with pytest.raises(InferenceError, match='already created'):
+        await build_coach_graph(respond, run_tool).ainvoke({'input': [{'role': 'user', 'content': 'Build me a plan'}]})
 
 
 @pytest.mark.asyncio

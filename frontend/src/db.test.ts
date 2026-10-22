@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TrainingDB, applyProposal, createSession, exportBackup, finishSession, hasLegacyData, importBackup, importLegacyData, initialize, savePlan } from './db';
+import { TrainingDB, applyProposal, cacheApprovedProposal, createSession, enqueueChange, exportBackup, finishSession, hasLegacyData, importBackup, importLegacyData, initialize, savePlan, syncRootId } from './db';
 import { catalog, starterPlan } from './catalog';
 import { backupSchema, defaultProfile, uid, type Proposal } from './domain';
 import { startSession } from './training';
@@ -112,5 +112,28 @@ describe('backup safety and proposal review', () => {
     await savePlan({ ...saved, name: 'Manual edit' }, db);
     await expect(applyProposal({ id: uid(), messageId: 'm', plan: saved, status: 'pending', baseRevision: saved.revision }, db)).rejects.toThrow(/changed/);
     expect((await db.plans.get(p.id))?.name).toBe('Manual edit');
+  });
+  it('caches an already approved server plan and its ETag without queuing a duplicate write', async () => {
+    const owned = new TrainingDB(`owned-${uid()}`, 'account'); await initialize(owned);
+    const plan = starterPlan(defaultProfile); await owned.plans.put(plan);
+    const proposal: Proposal = { id: uid(), messageId: 'message', plan: { ...plan, name: 'Server approved' },
+      status: 'pending', baseRevision: null, serverProposalId: uid(), type: 'create', targetPlanId: null,
+      sourceEtag: null, operations: [], assumptions: [], summary: 'Create plan', expiresAt: new Date().toISOString() };
+    await cacheApprovedProposal(proposal, proposal.plan, '"2"', owned);
+    expect((await owned.plans.get(plan.id))?.name).toBe('Server approved');
+    expect(await owned.sync.get(syncRootId('account', 'plans', plan.id))).toMatchObject({ etag: '"2"', version: 2 });
+    expect(await owned.outbox.count()).toBe(0);
+    expect((await owned.proposals.get(proposal.id))?.status).toBe('applied');
+    await owned.delete();
+  });
+  it('refuses to cache an approval over pending local edits', async () => {
+    const owned = new TrainingDB(`owned-${uid()}`, 'account'); await initialize(owned);
+    const plan = starterPlan(defaultProfile); await owned.plans.put(plan);
+    await enqueueChange('plans', plan.id, 'upsert', plan, owned);
+    const proposal: Proposal = { id: uid(), messageId: 'message', plan: { ...plan, name: 'Server approved' },
+      status: 'pending', baseRevision: null };
+    await expect(cacheApprovedProposal(proposal, proposal.plan, '"2"', owned)).rejects.toThrow(/unsynchronized/);
+    expect((await owned.plans.get(plan.id))?.name).toBe(plan.name);
+    await owned.delete();
   });
 });

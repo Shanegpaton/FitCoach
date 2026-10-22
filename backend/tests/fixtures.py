@@ -8,7 +8,7 @@ def exercise(id='custom'):
 
 
 def plan(id='plan', active=False):
-    return dict(id=id, name='Routine', schedule='week', cursor=0, revision=7, active=active, workouts=[
+    return dict(id=id, name='Routine', description='A practical training routine.', schedule='week', cursor=0, revision=7, active=active, workouts=[
         dict(id='workout-a', name='Workout A', days=[5, 1], blocks=[dict(id='block-a', exerciseId='ex-squat',
             restSeconds=90, supersetId='super', sets=[
                 dict(id='set-a', kind='working', targetReps=8, targetKg=None, chainId='chain'),

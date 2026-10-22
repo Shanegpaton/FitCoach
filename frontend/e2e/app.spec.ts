@@ -174,6 +174,97 @@ test('connected Coach sends through the API and labels the saved reply', async (
   await expect(page.getByText('Start with two training days.')).toBeVisible();
 });
 
+test('live Coach renders a durable structured proposal and requires sync before approval', async ({ page, context }) => {
+  const proposal = { id: 'a936e1b0-e49a-4cdb-9fc8-7ea2303aefa1', type: 'create', targetPlanId: null,
+    sourceEtag: null, operations: [], assumptions: ['Starting load is left for you to choose.'],
+    summary: 'New plan: Upper Lower (Upper A).', createdAt: '2026-10-21T12:00:00Z',
+    expiresAt: '2026-10-22T12:00:00Z', status: 'pending', plan: { id: 'coach-plan', name: 'Upper Lower',
+      schedule: 'week', cursor: 0, revision: 0, active: true, workouts: [{ id: 'upper-a', name: 'Upper A', days: [1],
+        blocks: [{ id: 'bench', exerciseId: 'ex-squat', restSeconds: 120, supersetId: null,
+          sets: [{ id: 'set-1', kind: 'working', targetReps: 8, targetKg: null, chainId: null }] }] }] } };
+  await context.route('https://api.example.com/v1/chatgpt/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    const body = path.endsWith('/connection') ? { connected: true, planUsageGranted: true }
+      : path.endsWith('/coach') ? { text: 'I drafted an upper-body day for review.', proposal }
+      : { connected: true, planUsageGranted: true };
+    return route.fulfill({ json: body, headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+      'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } });
+  });
+  let rejected = false;
+  await context.route('https://api.example.com/v1/coach/proposals/**', async route => {
+    if (route.request().url().endsWith('/reject')) rejected = true;
+    return route.fulfill({ json: { ...proposal, status: rejected ? 'rejected' : 'pending' },
+      headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+        'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } });
+  });
+  await openApp(page);
+  await page.getByRole('link', { name: 'Coach', exact: true }).click();
+  await expect(page.getByText('ChatGPT Coach', { exact: true })).toBeVisible();
+  await page.getByLabel('Message Coach').fill('Build me an upper lower plan.');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(page.getByText('NEW PLAN PROPOSAL')).toBeVisible();
+  await expect(page.getByText('Upper A', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Starting load is left for you/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Approve changes' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Reject changes' }).click();
+  await expect(page.getByText('Proposal dismissed or no longer valid')).toBeVisible();
+  expect(rejected).toBe(true);
+});
+
+test('live Coach approval commits through the API and refreshes the local plan cache', async ({ page, context }) => {
+  const proposal = { id: '81d560ac-5ef1-4e55-a6b9-6f393bf45547', type: 'create', targetPlanId: null,
+    sourceEtag: null, beforePlan: null, operations: [], assumptions: [], summary: 'New plan: Upper day.',
+    createdAt: '2026-10-21T12:00:00Z', expiresAt: '2026-10-22T12:00:00Z', status: 'pending',
+    plan: { id: 'approved-coach-plan', name: 'Upper day', description: 'A focused strength day.',
+      schedule: 'week', cursor: 0, revision: 0, active: true, workouts: [{ id: 'approved-upper', name: 'Upper A', days: [1],
+        blocks: [{ id: 'approved-bench', exerciseId: 'ex-bench', restSeconds: 120, supersetId: null,
+          sets: [{ id: 'approved-set', kind: 'working', targetReps: 5, targetKg: null, chainId: null }] }] }] } };
+  let approved = false;
+  await context.route(/^https:\/\/api\.example\.com\/v1\/sync\/changes/, route => route.fulfill({ json: { items: [], cursor: 0, highWater: 0, hasMore: false },
+    headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173', 'Access-Control-Allow-Headers': 'authorization,content-type',
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } }));
+  await context.route(/^https:\/\/api\.example\.com\/v1\/sync\/mutations/, async route => {
+    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173', 'Access-Control-Allow-Headers': 'authorization,content-type',
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    const mutations = route.request().postDataJSON().mutations as Array<{ mutationId: string; resource: string; id: string; expectedEtag?: string; payload: unknown }>;
+    return route.fulfill({ json: { results: mutations.map(mutation => ({ mutationId: mutation.mutationId,
+      status: mutation.expectedEtag ? 200 : 201, resource: mutation.resource, id: mutation.id,
+      etag: mutation.expectedEtag ?? '"1"', document: mutation.payload, error: null })) }, headers });
+  });
+  await context.route('https://api.example.com/v1/chatgpt/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    const body = path.endsWith('/connection') ? { connected: true, planUsageGranted: true }
+      : path.endsWith('/coach') ? { text: 'Review this plan before saving.', proposal }
+      : { connected: true, planUsageGranted: true };
+    return route.fulfill({ json: body, headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+      'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } });
+  });
+  await context.route('https://api.example.com/v1/coach/proposals/**', async route => {
+    if (route.request().url().endsWith('/approve')) {
+      approved = true;
+      return route.fulfill({ json: { proposal: { ...proposal, status: 'approved' }, plan: proposal.plan,
+        etag: '"1"', replayed: false }, headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+          'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } });
+    }
+    return route.fulfill({ json: { ...proposal, status: approved ? 'approved' : 'pending' },
+      headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173', 'Access-Control-Allow-Headers': 'authorization,content-type',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } });
+  });
+  await openApp(page);
+  await page.getByRole('link', { name: 'Coach', exact: true }).click();
+  await expect(page.getByText('ChatGPT Coach', { exact: true })).toBeVisible();
+  await page.getByLabel('Message Coach').fill('Build a strength plan.');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  const approve = page.getByRole('button', { name: 'Approve changes' });
+  await expect(approve).toBeEnabled({ timeout: 10000 });
+  await approve.click();
+  await expect(page.getByText('Applied to your plan')).toBeVisible();
+  expect(approved).toBe(true);
+  await page.getByRole('link', { name: 'Plan', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Upper day', exact: true })).toBeVisible();
+});
+
 test('custom exercise, superset flow and durable rest timer', async ({ page }) => {
   await openApp(page); await makePlan(page);
   await page.getByRole('link', { name: 'Plan', exact: true }).click();

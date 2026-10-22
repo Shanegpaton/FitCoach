@@ -424,3 +424,6 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 .auth-config { display: grid; gap: 6px; border: 1px solid #46553d; border-radius: 12px; padding: 14px; margin: 0 0 14px; background: #191e18; color: #c5d2bb; font-size: 12px; line-height: 1.5; }
 .auth-config strong { color: var(--text); font-size: 13px; }
 .auth-screen .auth-error { color: #ff9d91; margin-top: 16px; }
+.proposal-change { display: grid; gap: 4px; margin: 10px 0; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface-raised, rgba(127,127,127,.08)); border-radius: 8px; }
+.proposal-change strong { font-size: .9rem; }
+.proposal-change span { font-size: .82rem; color: var(--muted); line-height: 1.4; }

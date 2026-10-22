@@ -3,7 +3,12 @@ import { uid } from './domain';
 import type { Message, Plan, Profile, Session } from './domain';
 
 export interface ChatRequest { messages: Message[]; profile: Profile; plan?: Plan; recentWorkouts: Session[] }
-export interface ChatReply { text: string; proposal?: Plan; baseRevision?: number | null }
+export interface ServerPlanProposal {
+  id: string; type: 'create' | 'modify'; targetPlanId: string | null; sourceEtag: string | null;
+  plan: Plan; beforePlan: Plan | null; operations: Array<Record<string, unknown>>; assumptions: string[];
+  summary: string; createdAt: string; expiresAt: string; status: 'pending' | 'approved' | 'rejected' | 'expired' | 'invalidated';
+}
+export interface ChatReply { text: string; proposal?: Plan; baseRevision?: number | null; serverProposal?: ServerPlanProposal | null }
 export interface ChatAdapter { respond(request: ChatRequest): Promise<ChatReply> }
 
 export const sampleCoach: ChatAdapter = {

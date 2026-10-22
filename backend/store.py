@@ -245,7 +245,7 @@ class Store:
                     .returning(s.training_plans.c.pk))).scalars().all()
                 for pk in deactivated:
                     await self.mark_sync_change(s.training_plans, pk)
-            values = dict(name=item.name, schedule=item.schedule, cursor=item.cursor,
+            values = dict(name=item.name, description=item.description, schedule=item.schedule, cursor=item.cursor,
                           revision=item.revision, active=item.active)
         elif resource == 'sessions':
             plan = await self.root(s.training_plans, item.planId, live=False)
@@ -386,7 +386,7 @@ class Store:
             sets = await self.grouped(s.planned_sets, 'block_pk', [b['pk'] for b in all_blocks])
             exercises = {r['pk']: r['client_id'] for r in await self.rows(s.exercises,
                 s.exercises.c.pk.in_([b['exercise_pk'] for b in all_blocks]), live=False)}
-            return [dict(id=r['client_id'], name=r['name'], schedule=r['schedule'], cursor=r['cursor'],
+            return [dict(id=r['client_id'], name=r['name'], description=r['description'], schedule=r['schedule'], cursor=r['cursor'],
                 revision=r['revision'], active=r['active'], workouts=[dict(id=w['client_id'], name=w['name'],
                     days=[d['day'] for d in days[w['pk']]], blocks=[dict(id=b['client_id'],
                         exerciseId=exercises[b['exercise_pk']], restSeconds=b['rest_seconds'],

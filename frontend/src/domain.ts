@@ -28,7 +28,7 @@ export const workoutSchema = z.object({
   id, name: z.string().trim().min(1).max(100), days: z.array(day), blocks: z.array(blockSchema).min(1).max(50),
 });
 export const planSchema = z.object({
-  id, name: z.string().trim().min(1).max(100), schedule: z.enum(['week', 'rotation']),
+  id, name: z.string().trim().min(1).max(100), description: z.string().max(2000).default(''), schedule: z.enum(['week', 'rotation']),
   cursor: z.number().int().min(0), revision: z.number().int().min(0),
   active: z.boolean(), workouts: z.array(workoutSchema).min(1).max(30),
 }).superRefine((plan, ctx) => {
@@ -70,8 +70,13 @@ export const messageSchema = z.object({
   source: z.enum(['sample', 'chatgpt']).optional(),
 });
 export const proposalSchema = z.object({
-  id, messageId: id, plan: planSchema, status: z.enum(['pending', 'applied', 'rejected']),
+  id, messageId: id, plan: planSchema, status: z.enum(['pending', 'applied', 'rejected', 'expired', 'invalidated']),
   baseRevision: z.number().int().nullable(),
+  serverProposalId: id.optional(), type: z.enum(['create', 'modify']).optional(),
+  targetPlanId: id.nullable().optional(), sourceEtag: z.string().nullable().optional(),
+  beforePlan: planSchema.nullable().optional(),
+  operations: z.array(z.record(z.string(), z.unknown())).optional(), assumptions: z.array(z.string()).optional(),
+  summary: z.string().optional(), expiresAt: timestamp.optional(),
 });
 export const backupSchema = z.object({
   version: z.literal(1), exportedAt: timestamp, profile: profileSchema,
@@ -145,6 +150,6 @@ export function normalizeDropChains(sets: Prescription[]) {
   }
 }
 export function newPlan(): Plan {
-  return { id: uid(), name: 'My training plan', schedule: 'week', cursor: 0, revision: 0, active: false,
+  return { id: uid(), name: 'My training plan', description: '', schedule: 'week', cursor: 0, revision: 0, active: false,
     workouts: [{ id: uid(), name: 'Workout A', days: [1, 3, 5], blocks: [] }] };
 }
