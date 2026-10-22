@@ -24,7 +24,7 @@ class CoachState(TypedDict, total=False):
 
 
 def build_coach_graph(respond: Callable[[list[dict]], Awaitable[dict]],
-                      run_tool: Callable[[str, str], Awaitable[str]]):
+                      run_tool: Callable[[str, str], Awaitable[str]], checkpointer=None):
     """Compile model -> optional read-only tool -> model, with a call limit."""
 
     async def model(state: CoachState) -> CoachState:
@@ -71,4 +71,4 @@ def build_coach_graph(respond: Callable[[list[dict]], Awaitable[dict]],
     graph.add_edge(START, 'model')
     graph.add_conditional_edges('model', route, {'tool': 'tool', END: END})
     graph.add_edge('tool', 'model')
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)

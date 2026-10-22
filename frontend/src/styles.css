@@ -295,6 +295,13 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 .quiet-note { display: flex; align-items: center; gap: 14px; color: #8f9c80; padding: 24px 0; }
 .quiet-note p { font-size: 10px; flex: 1; }
 .coach-page { max-width: 730px; }
+.coach-conversations { display: flex; gap: 7px; overflow-x: auto; padding: 0 0 12px; margin: -10px 0 13px; scrollbar-width: thin; }
+.coach-conversation { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); max-width: min(86vw, 330px); padding: 3px; }
+.coach-conversation.active { border-color: var(--accent); }
+.coach-conversation-select { display: flex; flex-direction: column; gap: 3px; min-width: 90px; max-width: 220px; padding: 7px 9px; text-align: left; background: transparent; border: 0; }
+.coach-conversation-select span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.coach-conversation-select small { color: var(--muted); font-size: 9px; }
+.coach-conversation .icon-button { width: 30px; height: 32px; }
 .coach-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 23px; }
 .coach-top h1 { font-size: 43px; font-weight: 550; margin-top: 10px; }
 .demo-banner { padding: 14px 16px; background: #202819; border: 1px solid #3c4d2c; border-radius: 12px; }

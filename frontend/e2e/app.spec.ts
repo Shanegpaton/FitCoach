@@ -1,5 +1,26 @@
 import { test, expect, type Page } from '@playwright/test';
 
+function mockConversations(context: import('@playwright/test').BrowserContext) {
+  const items: Array<{ id: string; title: string; createdAt: string; updatedAt: string }> = [];
+  const messages = new Map<string, Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: string; metadata?: object }>>();
+  context.route('https://api.example.com/v1/coach/conversations**', async route => {
+    const path = new URL(route.request().url()).pathname; const method = route.request().method();
+    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173', 'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS' };
+    if (method === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (method === 'POST') {
+      const now = new Date().toISOString(); const item = { id: `conversation-${items.length + 1}`, title: 'New conversation', createdAt: now, updatedAt: now };
+      items.unshift(item); messages.set(item.id, []); return route.fulfill({ status: 201, json: item, headers });
+    }
+    const id = path.split('/').at(-1)!;
+    if (method === 'GET' && path.endsWith('/conversations')) return route.fulfill({ json: { items }, headers });
+    const item = items.find(value => value.id === id);
+    if (method === 'DELETE') { const index = items.findIndex(value => value.id === id); if (index >= 0) items.splice(index, 1); messages.delete(id); return route.fulfill({ status: 204, headers }); }
+    if (method === 'PATCH' && item) { item.title = route.request().postDataJSON().title; item.updatedAt = new Date().toISOString(); return route.fulfill({ json: item, headers }); }
+    return route.fulfill({ json: { ...item, messages: messages.get(id) ?? [], nextBefore: null }, headers });
+  });
+  return { items, messages };
+}
+
 test.beforeEach(async ({ page, context }) => {
   const unavailable = async (route: import('@playwright/test').Route) => {
     const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173',
@@ -144,16 +165,25 @@ test('sample Coach proposal is editable and only saved after Apply', async ({ pa
   await expect(page.getByRole('heading', { name: 'Reviewed routine', exact: true })).toBeVisible();
 });
 
+test.describe('persistent Coach conversations', () => {
+test.use({ serviceWorkers: 'block' });
+
 test('connected Coach sends through the API and labels the saved reply', async ({ page, context }) => {
   const calls: unknown[] = [];
+  const store = mockConversations(context);
   await context.route('https://api.example.com/v1/chatgpt/**', async route => {
     const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173',
       'Access-Control-Allow-Headers': 'authorization,content-type',
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
     if (route.request().url().endsWith('/coach')) {
-      calls.push(route.request().postDataJSON());
-      return route.fulfill({ json: { text: 'Start with two training days.' }, headers });
+      const body = route.request().postDataJSON(); calls.push(body);
+      const now = new Date().toISOString(); const history = store.messages.get(body.conversationId)!;
+      const conversation = store.items.find(item => item.id === body.conversationId);
+      if (conversation?.title === 'New conversation') conversation.title = body.message.text.slice(0, 160);
+      history.push({ id: 'user-turn', role: 'user', text: body.message.text, createdAt: now });
+      history.push({ id: 'assistant-turn', role: 'assistant', text: 'Start with two training days.', createdAt: now });
+      return route.fulfill({ json: { text: 'Start with two training days.', messageId: 'assistant-turn', userMessageId: 'user-turn' }, headers });
     }
     return route.fulfill({ json: { connected: true, planUsageGranted: true, storedInBackend: true }, headers });
   });
@@ -165,16 +195,30 @@ test('connected Coach sends through the API and labels the saved reply', async (
   await expect(page.getByText('Start with two training days.')).toBeVisible();
   await expect(page.getByText('COACH · CHATGPT')).toBeVisible();
   expect(calls).toHaveLength(1);
-  expect(calls[0]).toMatchObject({ messages: [{ role: 'user', text: 'How should I begin?' }],
+  expect(calls[0]).toMatchObject({ message: { role: 'user', text: 'How should I begin?' },
     trainingDataReady: false });
+  expect(calls[0]).toHaveProperty('conversationId');
+  expect(calls[0]).toHaveProperty('requestId');
   expect(calls[0]).toHaveProperty('localDate', expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
   expect(calls[0]).not.toHaveProperty('context');
   await page.reload();
   await page.getByRole('link', { name: 'Coach', exact: true }).click();
   await expect(page.getByText('Start with two training days.')).toBeVisible();
+  await page.getByRole('button', { name: 'New conversation' }).click();
+  await expect(page.getByText('Training with', { exact: false })).toBeVisible();
+  await page.locator('.coach-conversation-select').filter({ hasText: 'How should I begin?' }).click();
+  await expect(page.getByText('Start with two training days.')).toBeVisible();
+  page.once('dialog', dialog => dialog.accept('Bench notes'));
+  await page.getByRole('button', { name: /Rename How should I begin/ }).click();
+  await expect(page.locator('.coach-conversation-select').filter({ hasText: 'Bench notes' })).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: /Delete Bench notes/ }).click();
+  await expect(page.locator('.coach-conversation-select').filter({ hasText: 'New conversation' })).toBeVisible();
+});
 });
 
 test('live Coach renders a durable structured proposal and requires sync before approval', async ({ page, context }) => {
+  mockConversations(context);
   const proposal = { id: 'a936e1b0-e49a-4cdb-9fc8-7ea2303aefa1', type: 'create', targetPlanId: null,
     sourceEtag: null, operations: [], assumptions: ['Starting load is left for you to choose.'],
     summary: 'New plan: Upper Lower (Upper A).', createdAt: '2026-10-21T12:00:00Z',
@@ -185,7 +229,7 @@ test('live Coach renders a durable structured proposal and requires sync before 
   await context.route('https://api.example.com/v1/chatgpt/**', async route => {
     const path = new URL(route.request().url()).pathname;
     const body = path.endsWith('/connection') ? { connected: true, planUsageGranted: true }
-      : path.endsWith('/coach') ? { text: 'I drafted an upper-body day for review.', proposal }
+      : path.endsWith('/coach') ? { text: 'I drafted an upper-body day for review.', proposal, messageId: 'assistant-proposal', userMessageId: 'user-proposal' }
       : { connected: true, planUsageGranted: true };
     return route.fulfill({ json: body, headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173',
       'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } });
@@ -212,6 +256,7 @@ test('live Coach renders a durable structured proposal and requires sync before 
 });
 
 test('live Coach approval commits through the API and refreshes the local plan cache', async ({ page, context }) => {
+  mockConversations(context);
   const proposal = { id: '81d560ac-5ef1-4e55-a6b9-6f393bf45547', type: 'create', targetPlanId: null,
     sourceEtag: null, beforePlan: null, operations: [], assumptions: [], summary: 'New plan: Upper day.',
     createdAt: '2026-10-21T12:00:00Z', expiresAt: '2026-10-22T12:00:00Z', status: 'pending',
@@ -235,7 +280,7 @@ test('live Coach approval commits through the API and refreshes the local plan c
   await context.route('https://api.example.com/v1/chatgpt/**', async route => {
     const path = new URL(route.request().url()).pathname;
     const body = path.endsWith('/connection') ? { connected: true, planUsageGranted: true }
-      : path.endsWith('/coach') ? { text: 'Review this plan before saving.', proposal }
+      : path.endsWith('/coach') ? { text: 'Review this plan before saving.', proposal, messageId: 'assistant-proposal', userMessageId: 'user-proposal' }
       : { connected: true, planUsageGranted: true };
     return route.fulfill({ json: body, headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173',
       'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } });

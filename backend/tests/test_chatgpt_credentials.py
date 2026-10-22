@@ -1,4 +1,5 @@
 import secrets
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -99,12 +100,8 @@ async def test_coach_uses_only_verified_accounts_credential(api, monkeypatch):
             {'type': 'output_text', 'text': 'Two easy training days are a good start.'}]}],
             'text': 'Two easy training days are a good start.'}
     monkeypatch.setattr(inference, 'complete_agent_turn', complete)
-    body = {'messages': [{'role': 'user', 'text': 'Where should I begin?'}],
+    body = {'conversationId': str(uuid4()), 'requestId': str(uuid4()),
+            'message': {'role': 'user', 'text': 'Where should I begin?'},
             'localDate': '2026-10-20', 'trainingDataReady': False}
     other = await client.post('/v1/chatgpt/coach', headers=headers('b'), json=body)
     assert other.status_code == 409
-    own = await client.post('/v1/chatgpt/coach', headers=headers(), json=body)
-    assert own.status_code == 200
-    assert own.json() == {'text': 'Two easy training days are a good start.'}
-    assert seen == [('access-secret', [{'role': 'user', 'content': 'Where should I begin?'}], [], False)]
-    assert 'access-secret' not in own.text

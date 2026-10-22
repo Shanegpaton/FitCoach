@@ -2,13 +2,13 @@ import { starterPlan } from './catalog';
 import { uid } from './domain';
 import type { Message, Plan, Profile, Session } from './domain';
 
-export interface ChatRequest { messages: Message[]; profile: Profile; plan?: Plan; recentWorkouts: Session[] }
+export interface ChatRequest { messages: Message[]; profile: Profile; plan?: Plan; recentWorkouts: Session[]; conversationId?: string; requestId?: string }
 export interface ServerPlanProposal {
   id: string; type: 'create' | 'modify'; targetPlanId: string | null; sourceEtag: string | null;
   plan: Plan; beforePlan: Plan | null; operations: Array<Record<string, unknown>>; assumptions: string[];
   summary: string; createdAt: string; expiresAt: string; status: 'pending' | 'approved' | 'rejected' | 'expired' | 'invalidated';
 }
-export interface ChatReply { text: string; proposal?: Plan; baseRevision?: number | null; serverProposal?: ServerPlanProposal | null }
+export interface ChatReply { text: string; proposal?: Plan; baseRevision?: number | null; serverProposal?: ServerPlanProposal | null; persistedMessageId?: string; persistedUserMessageId?: string; replayed?: boolean }
 export interface ChatAdapter { respond(request: ChatRequest): Promise<ChatReply> }
 
 export const sampleCoach: ChatAdapter = {

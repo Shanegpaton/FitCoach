@@ -1,5 +1,6 @@
 """Integration tests require an explicitly disposable PostgreSQL database."""
 import os
+import asyncio
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from alembic.config import Config
 from backend.app import create_app
 from backend.auth import AuthVerifier
 from backend.config import Settings
+from backend.setup_checkpointer import main as setup_checkpointer
 
 
 @pytest.fixture(scope='session')
@@ -27,6 +29,7 @@ def migrated_database():
     os.environ['FITCOACH_ALLOW_LOCAL_PLAINTEXT'] = 'true'
     config = Config(str(Path(__file__).parents[1] / 'alembic.ini'))
     command.upgrade(config, 'head')
+    asyncio.run(setup_checkpointer())
     engine = sa.create_engine(admin)
     with engine.connect() as connection:
         assert connection.scalar(sa.text('SELECT count(*) FROM fitcoach.exercise_catalog')) == 12

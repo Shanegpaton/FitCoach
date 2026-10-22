@@ -51,7 +51,8 @@ export async function saveVmConnection(userId: string): Promise<ChatGPTConnectio
 }
 
 export function liveCoach(userId: string, syncReady: boolean): ChatAdapter {
-  return { async respond({ messages }) {
+  return { async respond({ messages, conversationId, requestId }) {
+    if (!conversationId || !requestId) throw new Error('Choose a Coach conversation before sending a message.');
     const [state, pending, conflicts] = await Promise.all([
       db.sync.get(syncStateId(userId)), db.outbox.where('userId').equals(userId).count(),
       db.sync.where('userId').equals(userId).filter(item => item.kind === 'conflict').count(),
@@ -59,11 +60,12 @@ export function liveCoach(userId: string, syncReady: boolean): ChatAdapter {
     const trainingDataReady = syncReady && state?.bootstrapComplete === true && pending === 0 && conflicts === 0;
     const now = new Date();
     const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const reply = await backendChatGPTRequest<{ text: string; proposal?: import('./coach').ServerPlanProposal | null }>(userId, 'coach', {
+    const reply = await backendChatGPTRequest<{ text: string; proposal?: import('./coach').ServerPlanProposal | null; messageId: string; userMessageId?: string; replayed?: boolean }>(userId, 'coach', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: messages.slice(-16).map(message => ({ role: message.role, text: message.text.slice(0, 5000) })),
+      body: JSON.stringify({ conversationId, requestId, message: { role: 'user', text: messages.at(-1)?.text.slice(0, 5000) },
         localDate, trainingDataReady }),
     });
-    return { text: reply.text, serverProposal: reply.proposal ?? null };
+    return { text: reply.text, serverProposal: reply.proposal ?? null, persistedMessageId: reply.messageId,
+      persistedUserMessageId: reply.userMessageId, replayed: reply.replayed };
   } };
 }

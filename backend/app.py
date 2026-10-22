@@ -3,9 +3,10 @@ from contextlib import asynccontextmanager
 import hashlib
 import json
 import logging
+import os
 import time
 from typing import Annotated, Literal
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 
 import httpx
@@ -15,7 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError, DataError, IntegrityError, TimeoutError
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 if __package__:
     from .auth import AuthVerifier, identity
@@ -29,6 +30,9 @@ if __package__:
     from .agent.tools.database import TOOL_SPECS, run_database_tool
     from .agent.plan_proposal_service import approve_proposal, read_proposal, reject_proposal
     from .store import RESOURCES, Store, etag
+    from .conversations import (create_conversation, list_conversations, get_conversation,
+        rename_conversation, delete_conversation, conversation_messages, begin_turn,
+        finish_turn, fail_turn, read_turn)
 else:
     from auth import AuthVerifier, identity
     from config import Settings
@@ -41,6 +45,9 @@ else:
     from agent.tools.database import TOOL_SPECS, run_database_tool
     from agent.plan_proposal_service import approve_proposal, read_proposal, reject_proposal
     from store import RESOURCES, Store, etag
+    from conversations import (create_conversation, list_conversations, get_conversation,
+        rename_conversation, delete_conversation, conversation_messages, begin_turn,
+        finish_turn, fail_turn, read_turn)
 
 User = Annotated[UUID, Depends(identity)]
 logger = logging.getLogger(__name__)
@@ -84,15 +91,27 @@ class CoachMessage(BaseModel):
 
 class CoachRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    messages: list[CoachMessage] = Field(min_length=1, max_length=16)
+    conversationId: UUID
+    requestId: UUID
+    message: CoachMessage
     localDate: date | None = None
     trainingDataReady: bool = False
 
-    @model_validator(mode='after')
-    def last_message_is_user(self):
-        if self.messages[-1].role != 'user':
-            raise ValueError('The last message must be from the user')
-        return self
+
+class ConversationCreate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+
+class ConversationRename(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    title: str = Field(min_length=1, max_length=160)
+
+    @field_validator('title')
+    @classmethod
+    def nonblank_title(cls, value: str):
+        if not value.strip():
+            raise ValueError('Conversation title cannot be blank')
+        return value
 
 
 @asynccontextmanager
@@ -310,6 +329,8 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
 
     @app.post('/v1/chatgpt/coach')
     async def chatgpt_coach(body: CoachRequest, user: User):
+        if body.message.role != 'user':
+            raise HTTPException(422, 'A Coach turn must contain one user message.')
         # Hold the account row lock during refresh so concurrent workers cannot rotate
         # the same single-use refresh token independently.
         async with database.sessions() as session:
@@ -333,7 +354,18 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                     await session.execute(sa.text('''UPDATE fitcoach.chatgpt_credentials
                         SET ciphertext = :ciphertext, updated_at = now() WHERE user_id = :user_id'''),
                         {'user_id': user, 'ciphertext': chatgpt.encrypt_record(record)})
+        claim = await begin_turn(database, user, body.conversationId, body.requestId, body.message.text)
+        if claim['replay']:
+            proposal = None
+            refs = claim.get('metadata', {}).get('artifacts', [])
+            if refs and refs[0].get('type') == 'training_plan_proposal':
+                proposal = await read_proposal(database, user, UUID(refs[0]['id']))
+            return {'text': claim['text'], 'proposal': proposal, 'replayed': True,
+                    'messageId': claim['assistantMessageId']}
         try:
+            thread_id, history = await conversation_messages(database, user, body.conversationId)
+            # The new user turn was persisted by begin_turn and is already in this
+            # server-owned bounded history. Never append a client transcript.
             async def respond(input_items):
                 return await inference.complete_agent_turn(record['access_token'], input_items,
                     TOOL_SPECS if body.trainingDataReady else [], body.trainingDataReady)
@@ -344,12 +376,57 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                 return await run_database_tool(name, arguments, database, user,
                     body.localDate or date.today())
 
-            result = await build_coach_graph(respond, run_tool).ainvoke({
-                'input': [{'role': message.role, 'content': message.text} for message in body.messages],
-            })
+            os.environ.setdefault('LANGGRAPH_STRICT_MSGPACK', 'true')
+            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+            dsn = database.engine.url.set(drivername='postgresql').render_as_string(hide_password=False)
+            async with AsyncPostgresSaver.from_conn_string(dsn) as checkpointer:
+                graph = build_coach_graph(respond, run_tool, checkpointer=checkpointer)
+                result = await graph.ainvoke({'input': [{'role': m['role'], 'content': m['text']} for m in history]},
+                    config={'configurable': {'thread_id': thread_id}})
+            metadata = {'artifacts': ([{'id': result['proposal']['id'], 'type': 'training_plan_proposal'}]
+                                      if result.get('proposal') else [])}
+            assistant_message_id = await finish_turn(database, user, body.conversationId, body.requestId, result['text'], metadata)
         except inference.InferenceError as exc:
+            await fail_turn(database, user, body.conversationId, body.requestId)
             raise HTTPException(exc.status, exc.message) from None
-        return {'text': result['text'], 'proposal': result.get('proposal')}
+        except Exception:
+            await fail_turn(database, user, body.conversationId, body.requestId)
+            raise
+        return {'text': result['text'], 'proposal': result.get('proposal'), 'replayed': False,
+                'messageId': assistant_message_id, 'userMessageId': claim['userMessageId']}
+
+    @app.post('/v1/coach/conversations', status_code=201)
+    async def coach_create_conversation(body: ConversationCreate, user: User):
+        return await create_conversation(database, user)
+
+    @app.get('/v1/coach/conversations')
+    async def coach_list_conversations(user: User, limit: Annotated[int, Query(ge=1, le=100)] = 50,
+                                       before: datetime | None = None):
+        return {'items': await list_conversations(database, user, limit, before)}
+
+    @app.get('/v1/coach/conversations/{conversation_id}')
+    async def coach_get_conversation(conversation_id: UUID, user: User,
+                                     limit: Annotated[int, Query(ge=1, le=100)] = 50,
+                                     before: Annotated[int | None, Query(ge=1)] = None):
+        return await get_conversation(database, user, conversation_id, limit, before)
+
+    @app.patch('/v1/coach/conversations/{conversation_id}')
+    async def coach_rename_conversation(conversation_id: UUID, body: ConversationRename, user: User):
+        return await rename_conversation(database, user, conversation_id, body.title)
+
+    @app.get('/v1/coach/conversations/{conversation_id}/turns/{request_id}')
+    async def coach_get_turn(conversation_id: UUID, request_id: UUID, user: User):
+        return await read_turn(database, user, conversation_id, request_id)
+
+    @app.delete('/v1/coach/conversations/{conversation_id}', status_code=204)
+    async def coach_delete_conversation(conversation_id: UUID, user: User):
+        thread_id = await delete_conversation(database, user, conversation_id)
+        os.environ.setdefault('LANGGRAPH_STRICT_MSGPACK', 'true')
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        dsn = database.engine.url.set(drivername='postgresql').render_as_string(hide_password=False)
+        async with AsyncPostgresSaver.from_conn_string(dsn) as checkpointer:
+            await checkpointer.adelete_thread(thread_id)
+        return Response(status_code=204)
 
     @app.get('/v1/coach/proposals/{proposal_id}')
     async def coach_proposal(proposal_id: UUID, user: User):
