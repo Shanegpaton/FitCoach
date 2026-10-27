@@ -122,6 +122,8 @@ pip install -r backend/requirements-dev.txt
 
 Follow [the API setup and verification guide](backend/README.md) to provision a restricted runtime role, configure separate runtime/migration connection URLs, apply Alembic migrations, start Uvicorn, and make authenticated requests. Hosted PostgreSQL connections require TLS; use Supabase's direct connection or its session pooler for IPv4 environments. The guide also describes disposable PostgreSQL and Supabase development migration tests.
 
+Production backend pushes to `main` are handled by GitHub Actions: it applies pending Alembic migrations and checkpoint setup before triggering the Vercel backend deploy hook. See the [backend deployment guide](backend/README.md#automate-production-migrations-and-api-deployment) for required GitHub secrets and Vercel settings.
+
 The API starts without loading embeddings or Ollama. The API can deploy as a Vercel Python Function with `backend/` as its project root; see [the Vercel deployment steps](backend/README.md#deploy-the-api-on-vercel). Live ChatGPT Coach replies are available to connected accounts through a bounded LangGraph model/tool loop; conversation records and checkpoints are persisted per account, and live Coach plan proposals are persisted for approval across requests. Backend availability does not gate local workout entry. Multiple active sessions are allowed in the cloud so simultaneous offline workouts from different devices cannot reject one another's recorded sets.
 
 ## Python RAG Backend

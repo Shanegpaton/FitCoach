@@ -17,15 +17,18 @@ try:
     from ... import schema as tables
     from ...database import set_identity
     from ...store import Store
+    from ...domain import Plan
+    from ..inference import InferenceError
+    from ..plan_proposal_service import CreateRequest, ModifyRequest, create_proposal, modify_proposal
+    from ..plan_proposals import operations_adapter
 except ImportError:  # backend/ as the deployment project root
     import schema as tables
     from database import set_identity
     from store import Store
-
-from ..inference import InferenceError
-from ...domain import Plan
-from ..plan_proposal_service import CreateRequest, ModifyRequest, create_proposal, modify_proposal
-from ..plan_proposals import operations_adapter
+    from domain import Plan
+    from agent.inference import InferenceError
+    from agent.plan_proposal_service import CreateRequest, ModifyRequest, create_proposal, modify_proposal
+    from agent.plan_proposals import operations_adapter
 
 MAX_RESULT_CHARS = 24_000
 MAX_PAGE_OFFSET = 5_000

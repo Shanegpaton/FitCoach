@@ -7,7 +7,10 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from ..domain import Plan, Workout, Block, Prescription
+try:
+    from ..domain import Plan, Workout, Block, Prescription
+except ImportError:  # backend/ as the deployment project root
+    from domain import Plan, Workout, Block, Prescription
 
 
 class Operation(BaseModel):

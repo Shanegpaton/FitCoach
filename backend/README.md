@@ -67,6 +67,18 @@ Provision the restricted runtime role and run `alembic -c backend/alembic.ini up
 
 Set the frontend Vercel project's `VITE_FITCOACH_API_URL` to the API deployment's HTTPS origin, for example `https://api.example.com`, with no `/v1` suffix. Redeploy the frontend after changing this build-time variable. Preview frontend origins need to be added explicitly to `FITCOACH_CORS_ORIGINS` if they should sync. Choose a Vercel Function region close to the Supabase database in the API project settings. Then request `/health` on the API deployment and confirm the frontend's sync status online. The API URL is public; the runtime database URL must remain only in the API project's environment settings.
 
+### Automate production migrations and API deployment
+
+The repository includes `.github/workflows/deploy-backend.yml`. On pushes to `main` that change `backend/**`, it installs backend dependencies, applies `alembic upgrade head`, initializes LangGraph checkpoint tables and grants, and only then calls the backend Vercel deploy hook. It can also be started manually from **GitHub → Actions → Migrate and deploy backend → Run workflow**. Workflow runs are serialized so production migrations cannot overlap.
+
+Configure this once:
+
+1. In the backend Vercel project, create a **Production Deploy Hook** for the production branch and copy its URL.
+2. In GitHub repository **Settings → Secrets and variables → Actions**, add secrets named `FITCOACH_MIGRATION_DATABASE_URL` (the migration connection URL) and `VERCEL_BACKEND_DEPLOY_HOOK_URL` (the deploy hook URL). Set the Actions variable `FITCOACH_RUNTIME_ROLE` only if your runtime role differs from `fitcoach_api`.
+3. Disable automatic Git production deployments for the **backend Vercel project** so Vercel cannot build backend code before migrations finish. Leave frontend deployments independent. If a migration or checkpoint setup fails, the workflow stops before triggering the backend deployment.
+
+Use a dedicated migration credential, restrict who can edit/run this workflow, and rotate any database password pasted into chat or committed. Do not put the migration URL in Vercel API environment variables: deployed API code uses only the restricted runtime role. The GitHub runner must be able to resolve and connect to the selected Supabase hostname. Review the workflow output after its first run. For manual verification from a trusted environment, run `alembic -c backend/alembic.ini current`.
+
 ## API
 
 | Endpoint | Methods |
