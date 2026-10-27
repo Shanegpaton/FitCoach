@@ -179,7 +179,6 @@ async def test_activation_and_active_session_concurrency(api):
                                    put(client, 'sessions', session('two', 'active')))
     assert sorted(r.status_code for r in results) == [201, 201]
     assert len((await client.get('/v1/sessions', headers=headers())).json()['items']) == 2
-    assert len((await client.get('/v1/sessions', headers=headers())).json()['items']) == 1
 
 
 async def test_concurrent_stale_update(api):

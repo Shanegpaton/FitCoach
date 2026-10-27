@@ -14,5 +14,8 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_constraint('ck_training_plans_description', 'training_plans', schema='fitcoach', type_='check')
+    # The metadata naming convention prefixes the short name used above with
+    # the table name. Mark the expanded name so Alembic doesn't prefix it again.
+    op.drop_constraint(op.f('ck_training_plans_description'),
+                       'training_plans', schema='fitcoach', type_='check')
     op.drop_column('training_plans', 'description', schema='fitcoach')

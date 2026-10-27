@@ -114,10 +114,10 @@ async def test_identity_changes_resurrection_and_catalog_writes_are_denied(api):
 
 async def test_connection_pool_never_leaks_identity_after_success_or_failure(api):
     client, db, users = await populated(api)
-    for user in ['b', 'a', 'b', 'a', 'b']:
+    for index, user in enumerate(['b', 'a', 'b', 'a', 'b']):
         listing = await client.get('/v1/plans', headers=headers(user))
         assert len(listing.json()['items']) == (1 if user == 'a' else 0)
-        assert (await put(client, 'sessions', session('active-' + user, 'active'), user=user)).status_code == 201
+        assert (await put(client, 'sessions', session(f'active-{index}-{user}', 'active'), user=user)).status_code == 201
         async with db.sessions() as transaction, transaction.begin():
             assert await transaction.scalar(sa.select(sa.func.count()).select_from(s.training_plans)) == 0
             assert await transaction.scalar(sa.text("SELECT NULLIF(current_setting('app.user_id', true), '')")) is None

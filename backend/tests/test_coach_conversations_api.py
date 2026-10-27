@@ -46,6 +46,7 @@ async def test_conversation_crud_is_account_scoped_and_paginated(api):
     assert not retried['replay']
     _, history = await conversation_messages(database, users['a'], cid)
     assert [message['text'] for message in history].count('What should I do next?') == 1
+    await fail_turn(database, users['a'], cid, retry_id)
 
     assert (await client.delete(f'/v1/coach/conversations/{conversation_id}', headers=headers('b'))).status_code == 404
     deleted = await client.delete(f'/v1/coach/conversations/{conversation_id}', headers=headers())

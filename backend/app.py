@@ -380,6 +380,10 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
             dsn = database.engine.url.set(drivername='postgresql').render_as_string(hide_password=False)
             async with AsyncPostgresSaver.from_conn_string(dsn) as checkpointer:
+                # LangGraph's saver uses unqualified public checkpoint table names.
+                # Supabase roles can have a custom search_path, so select the schema
+                # explicitly instead of relying on the connection default.
+                await checkpointer.conn.execute('SET search_path TO public')
                 graph = build_coach_graph(respond, run_tool, checkpointer=checkpointer)
                 result = await graph.ainvoke({'input': [{'role': m['role'], 'content': m['text']} for m in history]},
                     config={'configurable': {'thread_id': thread_id}})
@@ -425,6 +429,7 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         dsn = database.engine.url.set(drivername='postgresql').render_as_string(hide_password=False)
         async with AsyncPostgresSaver.from_conn_string(dsn) as checkpointer:
+            await checkpointer.conn.execute('SET search_path TO public')
             await checkpointer.adelete_thread(thread_id)
         return Response(status_code=204)
 
