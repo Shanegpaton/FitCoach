@@ -1,8 +1,11 @@
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 from fastapi import HTTPException
 
+from backend.app import create_app
+from backend.config import Settings
 from backend.conversations import begin_turn, finish_turn, conversation_messages, fail_turn
 
 
@@ -11,8 +14,33 @@ def headers(token='a'):
 
 
 @pytest.mark.asyncio
+async def test_conversation_rename_cors_preflight():
+    settings = Settings(database_url='postgresql+psycopg://u:p@localhost/db',
+                        supabase_url='https://auth.example', supabase_key='test-key',
+                        cors_origins=('https://fitcoach.example',), allow_local_plaintext=True)
+    app = create_app(settings)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://api') as client:
+        response = await client.options('/v1/coach/conversations/example', headers={
+            'Origin': 'https://fitcoach.example',
+            'Access-Control-Request-Method': 'PATCH',
+            'Access-Control-Request-Headers': 'authorization,content-type',
+        })
+    await app.state.database.close()
+    assert response.status_code == 200
+    assert response.headers['access-control-allow-origin'] == 'https://fitcoach.example'
+    assert 'PATCH' in response.headers['access-control-allow-methods']
+
+
+@pytest.mark.asyncio
 async def test_conversation_crud_is_account_scoped_and_paginated(api):
     client, database, users, _ = api
+    preflight = await client.options('/v1/coach/conversations/example', headers={
+        'Origin': 'https://fitcoach.example',
+        'Access-Control-Request-Method': 'PATCH',
+        'Access-Control-Request-Headers': 'authorization,content-type',
+    })
+    assert preflight.status_code == 200
+    assert 'PATCH' in preflight.headers['access-control-allow-methods']
     assert (await client.get('/v1/coach/conversations')).status_code == 401
     created = await client.post('/v1/coach/conversations', headers=headers(), json={})
     assert created.status_code == 201

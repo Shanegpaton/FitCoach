@@ -135,7 +135,7 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.database = database
     app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
-        allow_methods=['GET', 'POST', 'PUT', 'DELETE'], allow_headers=['Authorization', 'Content-Type', 'If-Match'],
+        allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allow_headers=['Authorization', 'Content-Type', 'If-Match'],
         expose_headers=['ETag'])
 
     @app.exception_handler(IntegrityError)
@@ -434,7 +434,13 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
         async with AsyncPostgresSaver.from_conn_string(dsn) as checkpointer:
             checkpointer.conn.prepare_threshold = None
             await checkpointer.conn.execute('SET search_path TO public')
-            await checkpointer.adelete_thread(thread_id)
+            # adelete_thread() wraps its three DELETEs in Psycopg pipeline mode.
+            # Supabase's transaction pooler can reuse a backend connection whose
+            # prepared statement names collide with Psycopg's pipeline names.
+            # Run the same cleanup statements sequentially instead.
+            async with checkpointer.conn.cursor() as cursor:
+                for table in ('checkpoints', 'checkpoint_blobs', 'checkpoint_writes'):
+                    await cursor.execute(f'DELETE FROM public.{table} WHERE thread_id = %s', (thread_id,))
         return Response(status_code=204)
 
     @app.get('/v1/coach/proposals/{proposal_id}')

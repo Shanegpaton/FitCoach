@@ -49,7 +49,8 @@ def migrated_database():
 @pytest.fixture
 async def api(migrated_database):
     settings = Settings(database_url=migrated_database, supabase_url='https://auth.example',
-                        supabase_key='test-key', pool_size=2, allow_local_plaintext=True)
+                        supabase_key='test-key', pool_size=2, cors_origins=('https://fitcoach.example',),
+                        allow_local_plaintext=True)
     app = create_app(settings)
     users = {'a': uuid4(), 'b': uuid4()}
     auth_calls = []

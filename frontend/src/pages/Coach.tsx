@@ -142,29 +142,33 @@ export function Coach() {
   }, [userId]);
   const send = async (value = text) => {
     const content = value.trim(); if (!content || sending || mode === 'checking') return;
+    // A turn belongs to the conversation that was active when it was sent.
+    // The user can switch conversations while the network request is in flight.
+    const turnConversationId = activeConversationId;
+    const turnMessages = messages;
     setSending(true); setText('');
     const user: Message = { id: uid(), role: 'user', text: content, createdAt: new Date().toISOString() };
     const saved = await run(async () => {
       const isLive = mode === 'chatgpt' && userId && navigator.onLine;
       const adapter = isLive ? liveCoach(userId!, trainingDataReady) : sampleCoach;
-      const pendingKey = userId ? `fitcoach:${userId}:coach-pending-turn:${activeConversationId}` : '';
+      const pendingKey = userId && turnConversationId ? `fitcoach:${userId}:coach-pending-turn:${turnConversationId}` : '';
       if (isLive) {
         const stored = pendingKey ? localStorage.getItem(pendingKey) : null;
         const parsed = stored ? JSON.parse(stored) as { conversationId: string; requestId: string; text: string } : null;
-        pendingTurn.current = parsed?.conversationId === activeConversationId && parsed.text === content ? parsed
-          : { conversationId: activeConversationId, requestId: uid(), text: content };
+        pendingTurn.current = parsed?.conversationId === turnConversationId && parsed.text === content ? parsed
+          : { conversationId: turnConversationId, requestId: uid(), text: content };
         localStorage.setItem(pendingKey, JSON.stringify(pendingTurn.current));
       }
-      const reply = await adapter.respond({ messages: [...messages, user], profile, plan: plans.find(p => p.active), recentWorkouts: sessions.filter(s => s.status === 'completed').slice(-5),
-        conversationId: isLive ? activeConversationId : undefined, requestId: isLive ? pendingTurn.current?.requestId : undefined });
+      const reply = await adapter.respond({ messages: [...turnMessages, user], profile, plan: plans.find(p => p.active), recentWorkouts: sessions.filter(s => s.status === 'completed').slice(-5),
+        conversationId: isLive ? turnConversationId : undefined, requestId: isLive ? pendingTurn.current?.requestId : undefined });
       const assistant = { ...assistantMessage(reply.text, isLive ? 'chatgpt' : 'sample'), id: reply.persistedMessageId ?? uid() };
       const persistedUser = reply.persistedUserMessageId ? { ...user, id: reply.persistedUserMessageId } : user;
       if (isLive) {
         if (reply.replayed && userId) {
-          const conversation = await backendRequest<{ messages: Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: string }> }>(userId, `coach/conversations/${activeConversationId}?limit=100`);
-          setServerMessages(conversation.messages.map(message => ({ id: message.id, role: message.role, text: message.text,
+          const conversation = await backendRequest<{ messages: Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: string }> }>(userId, `coach/conversations/${turnConversationId}?limit=100`);
+          if (activeConversationId === turnConversationId) setServerMessages(conversation.messages.map(message => ({ id: message.id, role: message.role, text: message.text,
             createdAt: message.createdAt, source: message.role === 'assistant' ? 'chatgpt' : undefined })));
-        } else setServerMessages(existing => [...existing, persistedUser, assistant]);
+        } else if (activeConversationId === turnConversationId) setServerMessages(existing => [...existing, persistedUser, assistant]);
         if (pendingKey) localStorage.removeItem(pendingKey);
         pendingTurn.current = null;
       }
@@ -177,8 +181,11 @@ export function Coach() {
         summary: server.summary, expiresAt: server.expiresAt,
       } : reply.proposal ? { id: uid(), messageId: assistant.id, plan: reply.proposal, status: 'pending', baseRevision: reply.baseRevision ?? null } : null;
       if (isLive) {
-        if (proposal) { await db.proposals.put(proposal); setServerProposals(existing => [...existing.filter(p => p.id !== proposal.id), proposal]); }
-        setConversations(existing => existing.map(item => item.id === activeConversationId ? { ...item, title: item.title === 'New conversation' ? content.slice(0, 160) : item.title, updatedAt: new Date().toISOString() } : item));
+        if (proposal) {
+          await db.proposals.put(proposal);
+          if (activeConversationId === turnConversationId) setServerProposals(existing => [...existing.filter(p => p.id !== proposal.id), proposal]);
+        }
+        setConversations(existing => existing.map(item => item.id === turnConversationId ? { ...item, title: item.title === 'New conversation' ? content.slice(0, 160) : item.title, updatedAt: new Date().toISOString() } : item));
       } else await db.transaction('rw', [db.messages, db.proposals, db.outbox], async () => {
         await db.messages.bulkPut([user, assistant]);
         if (proposal) await db.proposals.add(proposal);
