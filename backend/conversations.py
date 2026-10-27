@@ -32,13 +32,16 @@ async def create_conversation(database, user_id: UUID):
 
 
 async def list_conversations(database, user_id: UUID, limit: int = 50, before: datetime | None = None):
+    before_clause = ' AND updated_at < :before' if before is not None else ''
+    params = {'user': user_id, 'limit': min(max(limit, 1), PAGE_MAX)}
+    if before is not None:
+        params['before'] = before
     async with database.sessions() as session:
         async with session.begin():
             await set_identity(session, user_id)
-            rows = (await session.execute(sa.text('''SELECT * FROM fitcoach.coach_conversations
-                WHERE user_id=:user AND (:before IS NULL OR updated_at < :before)
-                ORDER BY updated_at DESC, conversation_id LIMIT :limit'''),
-                {'user': user_id, 'before': before, 'limit': min(max(limit, 1), PAGE_MAX)})).mappings().all()
+            rows = (await session.execute(sa.text(f'''SELECT * FROM fitcoach.coach_conversations
+                WHERE user_id=:user{before_clause}
+                ORDER BY updated_at DESC, conversation_id LIMIT :limit'''), params)).mappings().all()
     return [_conversation(row) for row in rows]
 
 
@@ -50,11 +53,14 @@ async def get_conversation(database, user_id: UUID, conversation_id: UUID, limit
                 WHERE user_id=:user AND conversation_id=:id'''), {'user': user_id, 'id': conversation_id})).mappings().first()
             if not row:
                 raise HTTPException(404, 'Conversation not found')
-            rows = (await session.execute(sa.text('''SELECT message_id, role, content, metadata, created_at, sequence
+            before_clause = 'AND sequence < :before' if before is not None else ''
+            params = {'user': user_id, 'id': conversation_id,
+                      'limit': min(max(limit, 1), PAGE_MAX)}
+            if before is not None:
+                params['before'] = before
+            rows = (await session.execute(sa.text(f'''SELECT message_id, role, content, metadata, created_at, sequence
                 FROM fitcoach.coach_messages WHERE user_id=:user AND conversation_id=:id
-                AND (:before IS NULL OR sequence < :before) ORDER BY sequence DESC LIMIT :limit'''),
-                {'user': user_id, 'id': conversation_id, 'before': before,
-                 'limit': min(max(limit, 1), PAGE_MAX)})).mappings().all()
+                {before_clause} ORDER BY sequence DESC LIMIT :limit'''), params)).mappings().all()
     return {**_conversation(row), 'messages': [
         {'id': str(m['message_id']), 'role': m['role'], 'text': m['content'],
          'metadata': m['metadata'], 'createdAt': m['created_at'].isoformat(), 'sequence': m['sequence']}
