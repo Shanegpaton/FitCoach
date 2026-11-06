@@ -3,7 +3,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowRight, Check, MessageCircle, Plus, Send, Sparkles, X, Pencil, Trash2 } from 'lucide-react';
 import { db, applyProposal, cacheApprovedProposal, enqueueChange, putLocalChange, syncRootId } from '../db';
-import { assistantMessage, sampleCoach } from '../coach';
+import { assistantMessage, sampleCoach, isWorkoutProposal } from '../coach';
 import { BackendError, backendChatGPTRequest, backendRequest, liveCoach, type ChatGPTConnection } from '../chatgptVm';
 import { useAuth } from '../auth';
 import { formatLoad, uid, type Exercise, type Message, type Plan, type Profile, type Proposal } from '../domain';
@@ -226,7 +226,7 @@ export function CoachProvider({ children }: { children: ReactNode }) {
         const refs = conversation.messages.flatMap(message => (message.metadata?.artifacts ?? []).map(artifact => ({ messageId: message.id, artifact })));
         const results = await Promise.allSettled(refs.filter(ref => ['training_plan_proposal', 'workout_edit_proposal'].includes(ref.artifact.type)).map(async (ref): Promise<Proposal | WorkoutProposalMessage> => {
           const item = await backendRequest<ServerProposal>(userId, `coach/proposals/${ref.artifact.id}`);
-          if (item.type === 'session_modify') return { ...item, messageId: ref.messageId };
+          if (isWorkoutProposal(item)) return { ...item, messageId: ref.messageId };
           return {
             id: item.id, messageId: ref.messageId, plan: item.plan, status: item.status === 'approved' ? 'applied' as const : item.status,
             baseRevision: null, serverProposalId: item.id, type: item.type, targetPlanId: item.targetPlanId,
@@ -236,8 +236,8 @@ export function CoachProvider({ children }: { children: ReactNode }) {
         }));
         if (current) {
           const loaded = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
-          setServerProposals(loaded.filter((item): item is Proposal => item.type !== 'session_modify'));
-          setWorkoutProposals(loaded.filter((item): item is WorkoutProposalMessage => item.type === 'session_modify'));
+          setServerProposals(loaded.filter((item): item is Proposal => !('session' in item)));
+          setWorkoutProposals(loaded.filter((item): item is WorkoutProposalMessage => 'session' in item));
         }
       } catch (error) {
         if (current) void run(async () => { throw error; });
@@ -337,7 +337,7 @@ export function CoachProvider({ children }: { children: ReactNode }) {
           pendingTurn.current = null;
         }
 
-        const server = reply.serverProposal && reply.serverProposal.type !== 'session_modify' ? reply.serverProposal : null;
+        const server = reply.serverProposal && !isWorkoutProposal(reply.serverProposal) ? reply.serverProposal : null;
         const proposal: Proposal | null = server ? {
           id: uid(), messageId: assistant.id, plan: server.plan, status: 'pending',
           baseRevision: server.type === 'modify' ? Math.max(0, server.plan.revision - 1) : null,
@@ -347,7 +347,7 @@ export function CoachProvider({ children }: { children: ReactNode }) {
         } : reply.proposal ? { id: uid(), messageId: assistant.id, plan: reply.proposal, status: 'pending', baseRevision: reply.baseRevision ?? null } : null;
 
         if (isLive) {
-          if (reply.serverProposal?.type === 'session_modify' && scope.current === turnScope) {
+          if (reply.serverProposal && isWorkoutProposal(reply.serverProposal) && scope.current === turnScope) {
             const workout = reply.serverProposal;
             setWorkoutProposals(existing => [...existing.filter(item => item.id !== workout.id), { ...workout, messageId: assistant.id }]);
           }

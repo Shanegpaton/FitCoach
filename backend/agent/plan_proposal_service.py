@@ -14,6 +14,7 @@ try:
     from ..domain import Plan, Session
     from ..store import Store, etag
     from .plan_proposals import operations_adapter, apply_operations
+    from .workout_proposals import active_workouts
 except ImportError:
     from conversations import guard_proposal
     import schema as tables
@@ -21,6 +22,7 @@ except ImportError:
     from domain import Plan, Session
     from store import Store, etag
     from agent.plan_proposals import operations_adapter, apply_operations
+    from agent.workout_proposals import active_workouts
 
 
 class CreateRequest(BaseModel):
@@ -199,7 +201,8 @@ async def approve_proposal(database, user_id: UUID, proposal_id: UUID) -> dict:
             if not row:
                 raise HTTPException(404, 'Proposal not found')
             payload = json.loads(row['proposal_json'])
-            workout_edit = row['proposal_type'] == 'session_modify'
+            workout_create = row['proposal_type'] == 'session_create'
+            workout_edit = row['proposal_type'] in ('session_modify', 'session_create')
             resource, field, model = ('sessions', 'session', Session) if workout_edit else ('plans', 'plan', Plan)
             if row['status'] == 'approved':
                 current, current_row = await Store(session, user_id).read(resource, payload[field]['id'])
@@ -211,17 +214,20 @@ async def approve_proposal(database, user_id: UUID, proposal_id: UUID) -> dict:
                 stale = True
             else:
                 data = Store(session, user_id)
-                if row['proposal_type'] in ('modify', 'session_modify'):
-                    table, target = (tables.workout_sessions, row['target_session_id']) if workout_edit else (tables.training_plans, row['target_plan_id'])
+                if row['proposal_type'] in ('modify', 'session_modify', 'session_create'):
+                    table, target = (tables.workout_sessions, row['target_session_id']) if workout_edit and not workout_create else (tables.training_plans, row['target_plan_id'])
                     current = await data.root(table, target, lock=True)
-                    if current is None or etag(current) != row['source_etag']:
+                    if current is None or etag(current) != row['source_etag'] or (workout_create and await active_workouts(data)):
                         await session.execute(sa.text("UPDATE fitcoach.coach_proposals SET status='invalidated' WHERE proposal_id=:id"), {'id': proposal_id})
                         stale = True
                 if not stale:
                     try:
                         document = model.model_validate(payload[field])
                         async with session.begin_nested():
-                            saved, saved_row, _ = await data.put(resource, document, row['source_etag'], create_only=row['proposal_type'] == 'create')
+                            if workout_create:
+                                for block in document.blocks:
+                                    await data.exercise_reference(block.exerciseId)
+                            saved, saved_row, _ = await data.put(resource, document, None if workout_create else row['source_etag'], create_only=row['proposal_type'] in ('create', 'session_create'))
                     except HTTPException as error:
                         if error.status_code in (404, 409, 412, 422, 428):
                             await session.execute(sa.text("UPDATE fitcoach.coach_proposals SET status='invalidated' WHERE proposal_id=:id"), {'id': proposal_id})
@@ -233,5 +239,5 @@ async def approve_proposal(database, user_id: UUID, proposal_id: UUID) -> dict:
                         payload['status'] = 'approved'
                         result = {'proposal': payload, field: saved, 'etag': etag(saved_row), 'replayed': False}
     if stale:
-        raise HTTPException(409, 'Proposal expired, references unavailable data, or the workout or plan changed. Create a fresh proposal.')
+        raise HTTPException(409, 'Proposal expired, references unavailable data, the workout or plan changed, or another workout is active. Create a fresh proposal.')
     return result

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router';
 import type { ServerWorkoutProposal } from '../coach';
 import { cacheApprovedWorkout, db, syncRootId } from '../db';
 import { formatLoad, type Profile, type Session } from '../domain';
@@ -28,6 +29,8 @@ export function WorkoutProposal({ proposal, userId, ready, unit, onStatus, run }
   onStatus: (status: ServerWorkoutProposal['status']) => void;
   run: (action: () => Promise<void>, success?: string) => Promise<unknown>;
 }) {
+  const starting = proposal.type === 'session_create';
+  const active = proposal.session.status === 'active';
   const [busy, setBusy] = useState(false);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -44,9 +47,12 @@ export function WorkoutProposal({ proposal, userId, ready, unit, onStatus, run }
           const [pending, conflicts, root] = await Promise.all([
             database.outbox.where('userId').equals(userId).count(),
             database.sync.where('userId').equals(userId).filter(item => item.kind === 'conflict').count(),
-            database.sync.get(syncRootId(userId, 'sessions', proposal.targetSessionId)),
+            database.sync.get(syncRootId(userId, starting ? 'plans' : 'sessions', starting ? proposal.targetPlanId! : proposal.targetSessionId)),
           ]);
-          if (pending || conflicts || (root?.etag && root.etag !== proposal.sourceEtag))
+          const expected = starting ? proposal.sourcePlanEtag : proposal.sourceEtag;
+          if (starting && await database.sessions.where('status').equals('active').count())
+            throw new Error('A workout is already active on this device. Resume or edit it instead.');
+          if (pending || conflicts || (root?.etag && root.etag !== expected))
             throw new Error('Sync changes and resolve conflicts before accepting. If the workout changed, ask Coach for a fresh edit.');
         }
         try {
@@ -67,18 +73,19 @@ export function WorkoutProposal({ proposal, userId, ready, unit, onStatus, run }
           window.dispatchEvent(new Event('fitcoach:sync-now'));
           throw error;
         }
-      }, accept ? 'Workout changes accepted' : 'Workout changes rejected');
+      }, accept ? (starting ? 'Workout started' : 'Workout changes accepted') : 'Workout changes rejected');
     } finally { if (alive.current) setBusy(false); }
   };
-  return <div className="proposal-card workout-proposal" aria-label="Workout edit proposal">
-    <span className="eyebrow">WORKOUT EDIT PROPOSAL</span><h3>{proposal.session.name}</h3>
-    <p>Review the recorded workout and proposed changes. Nothing changes until you accept.</p>
+  return <div className="proposal-card workout-proposal" aria-label={starting ? 'Workout start proposal' : 'Workout edit proposal'}>
+    <span className="eyebrow">{starting ? 'START WORKOUT PROPOSAL' : active ? 'ACTIVE WORKOUT EDIT PROPOSAL' : 'WORKOUT EDIT PROPOSAL'}</span><h3>{proposal.session.name}</h3>
+    <p>{starting ? 'Review this workout. It starts only when you accept.' : 'Review the recorded workout and proposed changes. Nothing changes until you accept.'}</p>
     <details open><summary>Proposed workout</summary><WorkoutSnapshot value={proposal.session} unit={unit} /></details>
-    <details><summary>Original workout</summary><WorkoutSnapshot value={proposal.beforeSession} unit={unit} /></details>
-    <small>The original snapshot stays in this proposal. Expires {new Date(proposal.expiresAt).toLocaleString()}.</small>
+    {proposal.beforeSession && <details><summary>Original workout</summary><WorkoutSnapshot value={proposal.beforeSession} unit={unit} /></details>}
+    <small>{proposal.beforeSession ? 'The original snapshot stays in this proposal. ' : ''}Expires {new Date(proposal.expiresAt).toLocaleString()}.</small>
     {proposal.status === 'pending' ? <div className="proposal-actions">
-      <button className="button primary" disabled={busy || !ready || !navigator.onLine} onClick={() => void decide(true)}>Accept changes</button>
+      <button className="button primary" disabled={busy || !ready || !navigator.onLine} onClick={() => void decide(true)}>{starting ? 'Start workout' : 'Accept changes'}</button>
       <button className="button" disabled={busy || !navigator.onLine} onClick={() => void decide(false)}>Reject changes</button>
-    </div> : <p role="status">{proposal.status === 'approved' ? 'Applied to workout history' : `Workout edit ${proposal.status}`}</p>}
+    </div> : <p role="status">{proposal.status === 'approved' ? (starting ? 'Workout started' : active ? 'Applied to active workout' : 'Applied to workout history') : `Workout edit ${proposal.status}`}</p>}
+    {proposal.status === 'approved' && active && <Link className="button secondary" to={`/workout/${proposal.targetSessionId}`}>Open workout</Link>}
   </div>;
 }

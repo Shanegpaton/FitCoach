@@ -634,3 +634,88 @@ for (const decision of ['accept', 'reject', 'stale'] as const) {
 }
 
 });
+
+test.describe('Coach active workout tools', () => {
+  test.use({ serviceWorkers: 'block' });
+  for (const operation of ['start', 'edit', 'stale'] as const) {
+    test(`Coach can ${operation} an active workout through a reviewable proposal`, async ({ page, context }) => {
+      const origin = test.info().project.use.baseURL!;
+      const conversations = mockConversations(context, origin);
+      const headers = { 'Access-Control-Allow-Origin': origin,
+        'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
+      const original = { id: 'current-workout', planId: 'source-plan', workoutId: 'workout-a', name: 'Current squat workout',
+        date: '2026-11-06', startedAt: '2026-11-06T13:00:00.000Z', completedAt: null, status: 'active', notes: '',
+        timer: operation === 'start' ? null : { endAt: Date.now() + 90000, remaining: 0, duration: 90 },
+        blocks: [{ id: 'block-a', exerciseId: 'ex-squat', name: 'Barbell squat', loadMode: 'external', restSeconds: 90,
+          supersetId: null, notes: '', sets: [{ id: 'set-a', kind: 'working', targetReps: 8, targetKg: null,
+            chainId: null, kg: operation === 'start' ? null : 40, reps: operation === 'start' ? null : 8,
+            effort: null, done: operation !== 'start' }] }] };
+      const proposed = structuredClone(original);
+      if (operation !== 'start') proposed.blocks[0].sets.push({ ...proposed.blocks[0].sets[0], id: 'added-set',
+        targetReps: 5, kg: null, reps: null, done: false });
+      const proposal = { id: 'active-proposal', type: operation === 'start' ? 'session_create' : 'session_modify',
+        targetSessionId: original.id, sourceEtag: operation === 'start' ? null : '"1"',
+        targetPlanId: operation === 'start' ? 'source-plan' : null, sourcePlanEtag: operation === 'start' ? '"1"' : null,
+        beforeSession: operation === 'start' ? null : original, session: proposed, summary: 'Review this workout.',
+        createdAt: '2026-11-06T13:00:00Z', expiresAt: '2099-11-07T12:00:00Z', status: 'pending' };
+      let stored = operation === 'start' ? null : original;
+      let approved = false;
+      let invalidated = false;
+      await context.route(/^https:\/\/api\.example\.com\/v1\/sync\/changes/, route => route.fulfill({ headers, json: {
+        items: stored ? [{ resource: 'sessions', id: stored.id, sequence: approved ? 2 : 1, version: approved ? 2 : 1,
+          etag: approved ? '"2"' : '"1"', deleted: false, document: stored }] : [], cursor: approved ? 2 : 1,
+        highWater: approved ? 2 : 1, hasMore: false } }));
+      await context.route(/^https:\/\/api\.example\.com\/v1\/sync\/mutations/, async route => {
+        if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+        const mutations = route.request().postDataJSON().mutations as Array<{ mutationId: string; resource: string; id: string; payload: unknown }>;
+        return route.fulfill({ headers, json: { results: mutations.map(item => ({ ...item, status: 201,
+          etag: '"1"', document: item.payload, error: null })) } });
+      });
+      await context.route('https://api.example.com/v1/chatgpt/**', async route => {
+        if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+        if (!new URL(route.request().url()).pathname.endsWith('/coach'))
+          return route.fulfill({ headers, json: { connected: true, planUsageGranted: true } });
+        const conversationId = route.request().postDataJSON().conversationId as string;
+        conversations.messages.set(conversationId, [
+          { id: 'active-user', role: 'user', text: 'Help with my current workout.', createdAt: proposal.createdAt },
+          { id: 'active-assistant', role: 'assistant', text: 'Review this workout.', createdAt: proposal.createdAt,
+            metadata: { artifacts: [{ id: proposal.id, type: 'workout_edit_proposal' }] } },
+        ]);
+        return route.fulfill({ headers, json: { text: 'Review this workout.', proposal, messageId: 'active-assistant', userMessageId: 'active-user' } });
+      });
+      await context.route('https://api.example.com/v1/coach/proposals/**', async route => {
+        if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+        if (new URL(route.request().url()).pathname.endsWith('/approve')) {
+          if (operation === 'stale') {
+            invalidated = true;
+            return route.fulfill({ status: 409, headers, json: { detail: 'New sets were logged. Ask for a fresh proposal.' } });
+          }
+          approved = true; stored = proposed;
+          return route.fulfill({ headers, json: { proposal: { ...proposal, status: 'approved' }, session: stored, etag: '"2"', replayed: false } });
+        }
+        return route.fulfill({ headers, json: { ...proposal, status: approved ? 'approved' : invalidated ? 'invalidated' : 'pending' } });
+      });
+      await openApp(page);
+      await page.getByRole('link', { name: 'Coach', exact: true }).click();
+      await waitForCoachSync(page);
+      await page.getByLabel('Message Coach').fill(operation === 'start' ? 'Start workout A.' : 'Add a set of five to my current workout.');
+      await page.getByRole('button', { name: 'Send message' }).click();
+      const card = page.getByLabel(operation === 'start' ? 'Workout start proposal' : 'Workout edit proposal');
+      await expect(card).toBeVisible();
+      expect(stored).toEqual(operation === 'start' ? null : original);
+      await page.reload();
+      await expect(card).toBeVisible();
+      await waitForCoachSync(page);
+      await card.getByRole('button', { name: operation === 'start' ? 'Start workout' : 'Accept changes', exact: true }).click();
+      await expect(card.getByText(operation === 'stale' ? 'Workout edit invalidated' : operation === 'start' ? 'Workout started' : 'Applied to active workout', { exact: true })).toBeVisible();
+      expect(approved).toBe(operation !== 'stale');
+      expect(stored?.timer).toEqual(original.timer);
+      if (operation !== 'stale') {
+        if (operation === 'edit') expect(stored?.blocks[0].sets[0]).toEqual(original.blocks[0].sets[0]);
+        await card.getByRole('link', { name: 'Open workout' }).click();
+        await expect(page).toHaveURL(/\/workout\/current-workout$/);
+        await expect(page.getByRole('heading', { name: 'Current squat workout', exact: true })).toBeVisible();
+      }
+    });
+  }
+});

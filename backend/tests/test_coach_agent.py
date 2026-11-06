@@ -73,7 +73,7 @@ async def test_plan_proposal_tool_returns_reviewable_payload_without_approval_to
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('tool_name', ['propose_training_plan', 'propose_plan_changes', 'propose_workout_changes'])
+@pytest.mark.parametrize('tool_name', ['propose_training_plan', 'propose_plan_changes', 'propose_workout_changes', 'propose_active_workout_changes', 'propose_start_workout'])
 async def test_second_proposal_in_one_request_is_rejected(tool_name):
     count = 0
     async def respond(_):

@@ -159,3 +159,23 @@ describe('approved workout history corrections', () => {
     } finally { await account.delete(); }
   });
 });
+
+describe('approved Coach workout starts', () => {
+  it('caches a new session without duplicating its write or discarding competing active sessions', async () => {
+    const account = new TrainingDB(`workout-start-${uid()}`, 'user-a');
+    try {
+      const p = starterPlan(defaultProfile);
+      const first = startSession(p, p.workouts[0], catalog);
+      const second = startSession(p, p.workouts[1], catalog);
+      await account.sessions.put(first);
+      await enqueueChange('sessions', first.id, 'upsert', first, account);
+      const pending = await account.outbox.toArray();
+      await cacheApprovedWorkout(second, null, '"1"', account);
+      expect(await account.sessions.count()).toBe(2);
+      expect(await account.sessions.get(first.id)).toEqual(first);
+      expect(await account.sessions.get(second.id)).toEqual(second);
+      expect(await account.outbox.toArray()).toEqual(pending);
+      expect((await account.sync.get(syncRootId('user-a', 'sessions', second.id)))?.etag).toBe('"1"');
+    } finally { await account.delete(); }
+  });
+});

@@ -21,7 +21,7 @@ try:
     from ..inference import InferenceError
     from ..plan_proposal_service import CreateRequest, ModifyRequest, create_proposal, modify_proposal
     from ..plan_proposals import operations_adapter
-    from ..workout_proposals import WorkoutEditRequest, propose_workout_changes
+    from ..workout_proposals import WorkoutEditRequest, WorkoutStartRequest, propose_workout_changes, propose_workout_start
 except ImportError:  # backend/ as the deployment project root
     import schema as tables
     from database import set_identity
@@ -30,7 +30,7 @@ except ImportError:  # backend/ as the deployment project root
     from agent.inference import InferenceError
     from agent.plan_proposal_service import CreateRequest, ModifyRequest, create_proposal, modify_proposal
     from agent.plan_proposals import operations_adapter
-    from agent.workout_proposals import WorkoutEditRequest, propose_workout_changes
+    from agent.workout_proposals import WorkoutEditRequest, WorkoutStartRequest, propose_workout_changes, propose_workout_start
 
 MAX_RESULT_CHARS = 24_000
 MAX_PAGE_OFFSET = 5_000
@@ -112,6 +112,15 @@ def _typed_spec(name, description, properties, required, definitions):
 
 
 TOOL_SPECS.extend([
+    _spec('propose_start_workout',
+        'Propose starting one workout from an existing account plan. Read plans to select its planId and workoutId. The server creates an active session snapshot with unlogged sets, using the current local date. The user must accept it before starting. If a workout is already active, resume or edit that workout instead.', {
+        'planId': {'type': 'string', 'minLength': 1, 'maxLength': 200},
+        'workoutId': {'type': 'string', 'minLength': 1, 'maxLength': 200}}),
+    _typed_spec('propose_active_workout_changes',
+        'Propose changes to the current active workout, including exercises, sets, targets, logged reps/load, effort, notes, and order. Search active sessions and read the full snapshot first. Copy untouched fields and IDs exactly; keep status active, completedAt, startedAt, planId, workoutId, and the stored timer unchanged. Loads use kg. This does not finish a workout. The user must accept or reject the preview.', {
+        'sessionId': {'type': 'string', 'minLength': 1, 'maxLength': 200},
+        'session': {key: value for key, value in _session_schema.items() if key != '$defs'}},
+        ['sessionId', 'session'], _session_schema.get('$defs', {})),
     _typed_spec('propose_workout_changes',
         'Propose edits to any recorded fields of one completed workout, including exercises, sets, reps, load, effort, notes, order, and dates. Read its full snapshot with get_workout_sessions first; copy unchanged fields and IDs exactly, use kg for loads, and keep status completed. This tool stores a before/after draft only; the user must accept or reject it.', {
         'sessionId': {'type': 'string', 'minLength': 1, 'maxLength': 200},
@@ -257,6 +266,8 @@ ARG_MODELS = {
     'search_exercises': ExerciseSearch,
     'propose_training_plan': CreateRequest,
     'propose_workout_changes': WorkoutEditRequest,
+    'propose_active_workout_changes': WorkoutEditRequest,
+    'propose_start_workout': WorkoutStartRequest,
     'propose_plan_changes': ModifyRequest,
 }
 
@@ -458,6 +469,12 @@ async def _search_exercises(data: Store, args: ExerciseSearch):
 
 async def run_database_tool(name: str, arguments: str, database, user_id: UUID, today: date) -> str:
     """Validate model arguments, then read account data or store a proposal draft."""
+    if name == 'propose_start_workout':
+        result = await propose_workout_start(database, user_id, arguments, today)
+        return json.dumps(jsonable_encoder(result), separators=(',', ':'), allow_nan=False)
+    if name == 'propose_active_workout_changes':
+        result = await propose_workout_changes(database, user_id, arguments, expected_status='active')
+        return json.dumps(jsonable_encoder(result), separators=(',', ':'), allow_nan=False)
     if name == 'propose_workout_changes':
         result = await propose_workout_changes(database, user_id, arguments)
         return json.dumps(jsonable_encoder(result), separators=(',', ':'), allow_nan=False)

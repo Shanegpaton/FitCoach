@@ -9,11 +9,14 @@ export interface ServerPlanProposal {
   summary: string; createdAt: string; expiresAt: string; status: 'pending' | 'approved' | 'rejected' | 'expired' | 'invalidated';
 }
 export interface ServerWorkoutProposal {
-  id: string; type: 'session_modify'; targetSessionId: string; sourceEtag: string;
-  session: Session; beforeSession: Session; summary: string; createdAt: string; expiresAt: string;
+  id: string; type: 'session_modify' | 'session_create'; targetSessionId: string; sourceEtag: string | null;
+  targetPlanId?: string | null; sourcePlanEtag?: string | null;
+  session: Session; beforeSession: Session | null; summary: string; createdAt: string; expiresAt: string;
   status: ServerPlanProposal['status'];
 }
 export type ServerProposal = ServerPlanProposal | ServerWorkoutProposal;
+export const isWorkoutProposal = (proposal: ServerProposal): proposal is ServerWorkoutProposal =>
+  proposal.type === 'session_modify' || proposal.type === 'session_create';
 export interface ChatReply { text: string; proposal?: Plan; baseRevision?: number | null; serverProposal?: ServerProposal | null; persistedMessageId?: string; persistedUserMessageId?: string; replayed?: boolean }
 export interface ChatAdapter { respond(request: ChatRequest): Promise<ChatReply> }
 
