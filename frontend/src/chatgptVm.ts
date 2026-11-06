@@ -28,22 +28,48 @@ export async function backendChatGPTRequest<T>(userId: string, path: string, ini
   return backendRequest<T>(userId, `chatgpt/${path}`, init);
 }
 
+export class BackendError extends Error {
+  constructor(message: string, public status: number) { super(message); }
+}
+
 export async function backendRequest<T>(userId: string, path: string, init: RequestInit = {}): Promise<T> {
   if (!apiUrl) throw new Error('The training API is not configured.');
-  const send = async (refresh: boolean) => {
-    const token = await getSyncAccessToken(refresh, userId);
-    if (!token) throw new Error('Sign in online to connect ChatGPT.');
-    return fetch(`${apiUrl}/v1/${path}`, {
-      ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${token}` }, cache: 'no-store',
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  init.signal?.addEventListener('abort', abort, { once: true });
+  if (init.signal?.aborted) abort();
+  const timeout = setTimeout(abort, path === 'chatgpt/coach' ? 250_000 : 20_000);
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      const interrupted = () => reject(new Error('Request aborted'));
+      controller.signal.addEventListener('abort', interrupted, { once: true });
+      if (controller.signal.aborted) { interrupted(); return; }
+      const request = async (): Promise<T> => {
+        const send = async (refresh: boolean) => {
+          const token = await getSyncAccessToken(refresh, userId);
+          if (!token) throw new Error('Sign in online to connect ChatGPT.');
+          return fetch(`${apiUrl}/v1/${path}`, {
+            ...init, signal: controller.signal,
+            headers: { ...(init.headers ?? {}), Authorization: `Bearer ${token}` }, cache: 'no-store',
+          });
+        };
+        let response = await send(false);
+        if (response.status === 401) response = await send(true);
+        if (!response.ok) {
+          const body: unknown = await response.json().catch(() => ({}));
+          throw new BackendError(errorMessage(body, `ChatGPT storage request failed (${response.status}).`), response.status);
+        }
+        return response.status === 204 ? undefined as T : await response.json() as T;
+      };
+      void request().then(resolve, reject).finally(() => controller.signal.removeEventListener('abort', interrupted));
     });
-  };
-  let response = await send(false);
-  if (response.status === 401) response = await send(true);
-  if (!response.ok) {
-    const body: unknown = await response.json().catch(() => ({}));
-    throw new Error(errorMessage(body, `ChatGPT storage request failed (${response.status}).`));
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('The connection timed out. Your pending Coach message is kept; check its status before retrying.');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    init.signal?.removeEventListener('abort', abort);
   }
-  return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
 
 export async function saveVmConnection(userId: string): Promise<ChatGPTConnection> {

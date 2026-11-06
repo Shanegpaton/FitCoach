@@ -453,3 +453,75 @@ test('failed uploads stay visible instead of showing synchronized', async ({ pag
   await expect(page.getByText('Invalid profile data')).toBeVisible();
   await expect(page.getByText('All changes are synchronized.')).toHaveCount(0);
 });
+
+test.describe('Coach interrupted requests', () => {
+  test.use({ serviceWorkers: 'block' });
+
+  test('keeps an interrupted message across reload and retries with the original ID', async ({ page, context }) => {
+    const store = mockConversations(context);
+    const requests: Array<{ conversationId: string; requestId: string; message: { text: string } }> = [];
+    let status = 'started';
+    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+      'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
+    await context.route('https://api.example.com/v1/coach/conversations/*/turns/*', route =>
+      route.fulfill({ json: { status }, headers }));
+    await context.route('https://api.example.com/v1/chatgpt/**', async route => {
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      if (!route.request().url().endsWith('/coach')) return route.fulfill({ json: { connected: true, planUsageGranted: true }, headers });
+      const body = route.request().postDataJSON(); requests.push(body);
+      if (requests.length === 1) return route.fulfill({ status: 503, json: { detail: 'Connection interrupted' }, headers });
+      const now = new Date().toISOString();
+      store.messages.get(body.conversationId)!.push(
+        { id: 'recovered-user', role: 'user', text: body.message.text, createdAt: now },
+        { id: 'recovered-assistant', role: 'assistant', text: 'Recovered safely.', createdAt: now });
+      status = 'completed';
+      return route.fulfill({ json: { text: 'Recovered safely.', messageId: 'recovered-assistant', userMessageId: 'recovered-user' }, headers });
+    });
+    await openApp(page);
+    await page.getByRole('link', { name: 'Coach', exact: true }).click();
+    await expect(page.getByText('ChatGPT Coach', { exact: true })).toBeVisible();
+    await page.getByLabel('Message Coach').fill('Keep my question');
+    await page.getByRole('button', { name: 'Send message' }).click();
+    await expect(page.getByText(/Coach is still processing your saved message/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Send message' })).toBeDisabled();
+    await page.reload();
+    await expect(page.getByLabel('Message Coach')).toHaveValue('Keep my question');
+    await expect(page.getByText(/Coach is still processing your saved message/)).toBeVisible();
+    status = 'failed';
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(page.getByText(/Retry it with Send/)).toBeVisible();
+    await page.getByRole('button', { name: 'Send message' }).click();
+    await expect(page.getByText('Recovered safely.')).toBeVisible();
+    expect(requests).toHaveLength(2);
+    expect(requests[1].requestId).toBe(requests[0].requestId);
+    await expect(page.getByLabel('Message Coach')).toHaveValue('');
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(key => key.includes('coach-pending-turn:')).length)).toBe(0);
+  });
+
+  test('loads a completed reply after the response was lost without sending again', async ({ page, context }) => {
+    const store = mockConversations(context);
+    let sends = 0;
+    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+      'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
+    await context.route('https://api.example.com/v1/coach/conversations/*/turns/*', route =>
+      route.fulfill({ json: { status: 'completed' }, headers }));
+    await context.route('https://api.example.com/v1/chatgpt/**', async route => {
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      if (!route.request().url().endsWith('/coach')) return route.fulfill({ json: { connected: true, planUsageGranted: true }, headers });
+      sends++;
+      const body = route.request().postDataJSON(); const now = new Date().toISOString();
+      store.messages.get(body.conversationId)!.push(
+        { id: 'saved-user', role: 'user', text: body.message.text, createdAt: now },
+        { id: 'saved-assistant', role: 'assistant', text: 'Already saved on the server.', createdAt: now });
+      return route.fulfill({ status: 503, json: { detail: 'Response lost' }, headers });
+    });
+    await openApp(page);
+    await page.getByRole('link', { name: 'Coach', exact: true }).click();
+    await expect(page.getByText('ChatGPT Coach', { exact: true })).toBeVisible();
+    await page.getByLabel('Message Coach').fill('Answer once');
+    await page.getByRole('button', { name: 'Send message' }).click();
+    await expect(page.getByText('Already saved on the server.')).toBeVisible();
+    await expect(page.getByLabel('Message Coach')).toHaveValue('');
+    expect(sends).toBe(1);
+  });
+});

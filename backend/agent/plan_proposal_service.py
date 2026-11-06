@@ -8,12 +8,14 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 try:
+    from ..conversations import guard_proposal
     from .. import schema as tables
     from ..database import lock_user_mutations, set_identity
     from ..domain import Plan
     from ..store import Store, etag
     from .plan_proposals import operations_adapter, apply_operations
 except ImportError:
+    from conversations import guard_proposal
     import schema as tables
     from database import lock_user_mutations, set_identity
     from domain import Plan
@@ -125,6 +127,7 @@ def _validate_ids(plan: Plan) -> None:
 
 
 async def _persist(session, user_id, kind, target, source_etag, plan, before_plan, operations, assumptions):
+    await guard_proposal(session, user_id)
     now = datetime.now(timezone.utc)
     proposal_id = uuid4()
     payload = {'id': str(proposal_id), 'type': kind, 'targetPlanId': target,

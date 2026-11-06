@@ -1,5 +1,6 @@
 """Run with uvicorn backend.app:create_app --factory. No frontend synchronization."""
 from contextlib import asynccontextmanager
+import asyncio
 import hashlib
 import json
 import logging
@@ -32,7 +33,7 @@ if __package__:
     from .store import RESOURCES, Store, etag
     from .conversations import (create_conversation, list_conversations, get_conversation,
         rename_conversation, delete_conversation, conversation_messages, begin_turn,
-        finish_turn, fail_turn, read_turn)
+        finish_turn, fail_turn, read_turn, processing_turn)
 else:
     from auth import AuthVerifier, identity
     from config import Settings
@@ -47,7 +48,7 @@ else:
     from store import RESOURCES, Store, etag
     from conversations import (create_conversation, list_conversations, get_conversation,
         rename_conversation, delete_conversation, conversation_messages, begin_turn,
-        finish_turn, fail_turn, read_turn)
+        finish_turn, fail_turn, read_turn, processing_turn)
 
 User = Annotated[UUID, Depends(identity)]
 logger = logging.getLogger(__name__)
@@ -363,41 +364,45 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
             return {'text': claim['text'], 'proposal': proposal, 'replayed': True,
                     'messageId': claim['assistantMessageId']}
         try:
-            thread_id, history = await conversation_messages(database, user, body.conversationId)
-            # The new user turn was persisted by begin_turn and is already in this
-            # server-owned bounded history. Never append a client transcript.
-            async def respond(input_items):
-                return await inference.complete_agent_turn(record['access_token'], input_items,
-                    TOOL_SPECS if body.trainingDataReady else [], body.trainingDataReady)
+            async with processing_turn(database, user, body.conversationId, body.requestId, claim['attemptId']):
+                thread_id, history = await conversation_messages(database, user, body.conversationId)
+                # The new user turn was persisted by begin_turn and is already in this
+                # server-owned bounded history. Never append a client transcript.
+                async def respond(input_items):
+                    return await inference.complete_agent_turn(record['access_token'], input_items,
+                        TOOL_SPECS if body.trainingDataReady else [], body.trainingDataReady)
 
-            async def run_tool(name, arguments):
-                if not body.trainingDataReady:
-                    raise inference.InferenceError(502, 'Training data is still syncing.')
-                return await run_database_tool(name, arguments, database, user,
-                    body.localDate or date.today())
+                async def run_tool(name, arguments):
+                    if not body.trainingDataReady:
+                        raise inference.InferenceError(502, 'Training data is still syncing.')
+                    return await run_database_tool(name, arguments, database, user,
+                        body.localDate or date.today())
 
-            os.environ.setdefault('LANGGRAPH_STRICT_MSGPACK', 'true')
-            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-            dsn = database.engine.url.set(drivername='postgresql').render_as_string(hide_password=False)
-            async with AsyncPostgresSaver.from_conn_string(dsn) as checkpointer:
-                # The Supabase transaction pooler can reuse a server connection
-                # that already has Psycopg's generated prepared-statement name.
-                checkpointer.conn.prepare_threshold = None
-                # LangGraph's saver uses unqualified public checkpoint table names.
-                # Supabase roles can have a custom search_path, so select the schema
-                # explicitly instead of relying on the connection default.
-                await checkpointer.conn.execute('SET search_path TO public')
-                graph = build_coach_graph(respond, run_tool, checkpointer=checkpointer)
-                result = await graph.ainvoke({'input': [{'role': m['role'], 'content': m['text']} for m in history]},
-                    config={'configurable': {'thread_id': thread_id}})
-            metadata = {'artifacts': ([{'id': result['proposal']['id'], 'type': 'training_plan_proposal'}]
-                                      if result.get('proposal') else [])}
-            assistant_message_id = await finish_turn(database, user, body.conversationId, body.requestId, result['text'], metadata)
+                os.environ.setdefault('LANGGRAPH_STRICT_MSGPACK', 'true')
+                from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+                dsn = database.engine.url.set(drivername='postgresql').render_as_string(hide_password=False)
+                async with AsyncPostgresSaver.from_conn_string(dsn) as checkpointer:
+                    # The Supabase transaction pooler can reuse a server connection
+                    # that already has Psycopg's generated prepared-statement name.
+                    checkpointer.conn.prepare_threshold = None
+                    # LangGraph's saver uses unqualified public checkpoint table names.
+                    # Supabase roles can have a custom search_path, so select the schema
+                    # explicitly instead of relying on the connection default.
+                    await checkpointer.conn.execute('SET search_path TO public')
+                    graph = build_coach_graph(respond, run_tool, checkpointer=checkpointer)
+                    result = await graph.ainvoke({'input': [{'role': m['role'], 'content': m['text']} for m in history]},
+                        config={'configurable': {'thread_id': claim['threadId']}})
+                metadata = {'artifacts': ([{'id': result['proposal']['id'], 'type': 'training_plan_proposal'}]
+                                          if result.get('proposal') else [])}
+                assistant_message_id = await finish_turn(database, user, body.conversationId, body.requestId, result['text'], metadata, attempt_id=claim['attemptId'])
         except inference.InferenceError as exc:
-            await fail_turn(database, user, body.conversationId, body.requestId)
+            await fail_turn(database, user, body.conversationId, body.requestId, attempt_id=claim['attemptId'])
             raise HTTPException(exc.status, exc.message) from None
-        except Exception:
-            await fail_turn(database, user, body.conversationId, body.requestId)
+        except asyncio.TimeoutError:
+            await fail_turn(database, user, body.conversationId, body.requestId, attempt_id=claim['attemptId'])
+            raise HTTPException(504, 'Coach took too long. Your message is saved; retry it from the conversation.') from None
+        except (Exception, asyncio.CancelledError):
+            await fail_turn(database, user, body.conversationId, body.requestId, attempt_id=claim['attemptId'])
             raise
         return {'text': result['text'], 'proposal': result.get('proposal'), 'replayed': False,
                 'messageId': assistant_message_id, 'userMessageId': claim['userMessageId']}
@@ -440,7 +445,7 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
             # Run the same cleanup statements sequentially instead.
             async with checkpointer.conn.cursor() as cursor:
                 for table in ('checkpoints', 'checkpoint_blobs', 'checkpoint_writes'):
-                    await cursor.execute(f'DELETE FROM public.{table} WHERE thread_id = %s', (thread_id,))
+                    await cursor.execute(f'DELETE FROM public.{table} WHERE thread_id = %s OR thread_id LIKE %s', (thread_id, thread_id + ':%'))
         return Response(status_code=204)
 
     @app.get('/v1/coach/proposals/{proposal_id}')

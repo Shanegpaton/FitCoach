@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { ArrowRight, Check, MessageCircle, Plus, Send, Sparkles, X, Pencil, Trash2 } from 'lucide-react';
 import { db, applyProposal, cacheApprovedProposal, enqueueChange, putLocalChange, syncRootId } from '../db';
 import { assistantMessage, sampleCoach } from '../coach';
-import { backendChatGPTRequest, backendRequest, liveCoach, type ChatGPTConnection } from '../chatgptVm';
+import { BackendError, backendChatGPTRequest, backendRequest, liveCoach, type ChatGPTConnection } from '../chatgptVm';
 import { useAuth } from '../auth';
 import { formatLoad, uid, type Exercise, type Message, type Plan, type Profile, type Proposal } from '../domain';
 import { useApp } from '../state';
@@ -63,6 +63,11 @@ export function Coach() {
   const [activeConversationId, setActiveConversationId] = useState('');
   const [serverMessages, setServerMessages] = useState<Message[]>([]);
   const [serverProposals, setServerProposals] = useState<Proposal[]>([]);
+  const [recovery, setRecovery] = useState<'checking' | 'started' | 'failed' | 'unknown' | null>(null);
+  const [recoveryVersion, setRecoveryVersion] = useState(0);
+  const sendLock = useRef(false);
+  const scope = useRef('');
+  scope.current = `${userId}:${activeConversationId}`;
   const pendingTurn = useRef<{ conversationId: string; requestId: string; text: string } | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const messages = mode === 'chatgpt' ? serverMessages : sampleMessages;
@@ -94,35 +99,61 @@ export function Coach() {
     return () => { current = false; };
   }, [mode, userId]);
   useEffect(() => {
-    if (mode !== 'chatgpt' || !userId || !activeConversationId) return;
+    if (mode !== 'chatgpt' || !userId || !activeConversationId) { setRecovery(null); return; }
     let current = true;
     localStorage.setItem(`fitcoach:${userId}:coach-active-conversation`, activeConversationId);
     const pendingKey = `fitcoach:${userId}:coach-pending-turn:${activeConversationId}`;
     const pendingText = localStorage.getItem(pendingKey);
-    if (pendingText) { try { setText((JSON.parse(pendingText) as { text: string }).text); } catch { localStorage.removeItem(pendingKey); } }
-    void backendRequest<{ messages: Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: string; metadata?: { artifacts?: Array<{ id: string; type: string }> } }> }>(userId,
-      `coach/conversations/${activeConversationId}?limit=100`).then(async conversation => {
-      if (!current) return;
-      const pending = localStorage.getItem(pendingKey);
-      if (pending) try {
-        const turn = JSON.parse(pending) as { requestId: string };
-        const status = await backendRequest<{ status: string }>(userId, `coach/conversations/${activeConversationId}/turns/${turn.requestId}`);
-        if (current && status.status === 'completed') { localStorage.removeItem(pendingKey); setText(''); }
-      } catch { /* The pending user turn remains available for an idempotent retry. */ }
-      setServerMessages(conversation.messages.map(message => ({ id: message.id, role: message.role, text: message.text,
-        createdAt: message.createdAt, source: message.role === 'assistant' ? 'chatgpt' : undefined })));
-      const refs = conversation.messages.flatMap(message => (message.metadata?.artifacts ?? []).map(artifact => ({ messageId: message.id, artifact })));
-      const results = await Promise.allSettled(refs.filter(ref => ref.artifact.type === 'training_plan_proposal').map(async ref => {
-        const item = await backendRequest<import('../coach').ServerPlanProposal>(userId, `coach/proposals/${ref.artifact.id}`);
-        return { id: item.id, messageId: ref.messageId, plan: item.plan, status: item.status === 'approved' ? 'applied' as const : item.status,
-          baseRevision: null, serverProposalId: item.id, type: item.type, targetPlanId: item.targetPlanId,
-          beforePlan: item.beforePlan, sourceEtag: item.sourceEtag, operations: item.operations,
-          assumptions: item.assumptions, summary: item.summary, expiresAt: item.expiresAt } satisfies Proposal;
-      }));
-      if (current) setServerProposals(results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
-    }).catch(error => { if (current) void run(async () => { throw error; }); });
-    return () => { current = false; };
-  }, [mode, userId, activeConversationId]);
+    setRecovery(pendingText ? 'checking' : null);
+    if (pendingText) { try { const restored = (JSON.parse(pendingText) as { text: string }).text; setText(draft => draft || restored); } catch { setRecovery('unknown'); } }
+    let refreshing = false;
+    const refresh = async () => {
+      if (refreshing || sendLock.current || !navigator.onLine) return;
+      refreshing = true;
+      try {
+        const pending = localStorage.getItem(pendingKey);
+        if (pending) {
+          try {
+            const turn = JSON.parse(pending) as { requestId: string; text: string };
+            const status = await backendRequest<{ status: string }>(userId, `coach/conversations/${activeConversationId}/turns/${turn.requestId}`);
+            if (!current) return;
+            if (status.status === 'completed') {
+              if (localStorage.getItem(pendingKey) === pending) {
+                localStorage.removeItem(pendingKey); setText(draft => draft === turn.text ? '' : draft); setRecovery(null);
+              }
+            } else setRecovery(status.status === 'started' ? 'started' : 'failed');
+          } catch (error) {
+            if (current) setRecovery(error instanceof BackendError && error.status === 404 ? 'failed' : 'unknown');
+          }
+        } else if (current) setRecovery(null);
+        const conversation = await backendRequest<{ messages: Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: string; metadata?: { artifacts?: Array<{ id: string; type: string }> } }> }>(userId,
+          `coach/conversations/${activeConversationId}?limit=100`);
+        if (!current || sendLock.current) return;
+        setServerMessages(conversation.messages.map(message => ({ id: message.id, role: message.role, text: message.text,
+          createdAt: message.createdAt, source: message.role === 'assistant' ? 'chatgpt' : undefined })));
+        const refs = conversation.messages.flatMap(message => (message.metadata?.artifacts ?? []).map(artifact => ({ messageId: message.id, artifact })));
+        const results = await Promise.allSettled(refs.filter(ref => ref.artifact.type === 'training_plan_proposal').map(async ref => {
+          const item = await backendRequest<import('../coach').ServerPlanProposal>(userId, `coach/proposals/${ref.artifact.id}`);
+          return { id: item.id, messageId: ref.messageId, plan: item.plan, status: item.status === 'approved' ? 'applied' as const : item.status,
+            baseRevision: null, serverProposalId: item.id, type: item.type, targetPlanId: item.targetPlanId,
+            beforePlan: item.beforePlan, sourceEtag: item.sourceEtag, operations: item.operations,
+            assumptions: item.assumptions, summary: item.summary, expiresAt: item.expiresAt } satisfies Proposal;
+        }));
+        if (current) setServerProposals(results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
+      } catch (error) { if (current) void run(async () => { throw error; }); }
+      finally { refreshing = false; }
+    };
+    const visible = () => { if (document.visibilityState === 'visible') void refresh(); };
+    void refresh();
+    const timer = window.setInterval(() => { if (localStorage.getItem(pendingKey)) visible(); }, 5000);
+    window.addEventListener('online', visible); window.addEventListener('focus', visible);
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      current = false; clearInterval(timer);
+      window.removeEventListener('online', visible); window.removeEventListener('focus', visible);
+      document.removeEventListener('visibilitychange', visible);
+    };
+  }, [mode, userId, activeConversationId, recoveryVersion]);
   useEffect(() => {
     if (!userId || !navigator.onLine) return;
     let current = true;
@@ -143,60 +174,70 @@ export function Coach() {
     return () => { current = false; window.removeEventListener('focus', visible); document.removeEventListener('visibilitychange', visible); };
   }, [userId]);
   const send = async (value = text) => {
-    const content = value.trim(); if (!content || sending || mode === 'checking') return;
+    const content = value.trim(); if (!content || sendLock.current || mode === 'checking' || (recovery && recovery !== 'failed')) return;
     // A turn belongs to the conversation that was active when it was sent.
     // The user can switch conversations while the network request is in flight.
     const turnConversationId = activeConversationId;
     const turnMessages = messages;
-    setSending(true); setText('');
-    const user: Message = { id: uid(), role: 'user', text: content, createdAt: new Date().toISOString() };
-    const saved = await run(async () => {
-      const isLive = mode === 'chatgpt' && userId && navigator.onLine;
-      const adapter = isLive ? liveCoach(userId!, trainingDataReady) : sampleCoach;
-      const pendingKey = userId && turnConversationId ? `fitcoach:${userId}:coach-pending-turn:${turnConversationId}` : '';
-      if (isLive) {
-        const stored = pendingKey ? localStorage.getItem(pendingKey) : null;
-        const parsed = stored ? JSON.parse(stored) as { conversationId: string; requestId: string; text: string } : null;
-        pendingTurn.current = parsed?.conversationId === turnConversationId && parsed.text === content ? parsed
-          : { conversationId: turnConversationId, requestId: uid(), text: content };
-        localStorage.setItem(pendingKey, JSON.stringify(pendingTurn.current));
-      }
-      const reply = await adapter.respond({ messages: [...turnMessages, user], profile, plan: plans.find(p => p.active), recentWorkouts: sessions.filter(s => s.status === 'completed').slice(-5),
-        conversationId: isLive ? turnConversationId : undefined, requestId: isLive ? pendingTurn.current?.requestId : undefined });
-      const assistant = { ...assistantMessage(reply.text, isLive ? 'chatgpt' : 'sample'), id: reply.persistedMessageId ?? uid() };
-      const persistedUser = reply.persistedUserMessageId ? { ...user, id: reply.persistedUserMessageId } : user;
-      if (isLive) {
-        if (reply.replayed && userId) {
-          const conversation = await backendRequest<{ messages: Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: string }> }>(userId, `coach/conversations/${turnConversationId}?limit=100`);
-          if (activeConversationId === turnConversationId) setServerMessages(conversation.messages.map(message => ({ id: message.id, role: message.role, text: message.text,
-            createdAt: message.createdAt, source: message.role === 'assistant' ? 'chatgpt' : undefined })));
-        } else if (activeConversationId === turnConversationId) setServerMessages(existing => [...existing, persistedUser, assistant]);
-        if (pendingKey) localStorage.removeItem(pendingKey);
-        pendingTurn.current = null;
-      }
-      const server = reply.serverProposal;
-      const proposal: Proposal | null = server ? {
-        id: uid(), messageId: assistant.id, plan: server.plan, status: 'pending',
-        baseRevision: server.type === 'modify' ? Math.max(0, server.plan.revision - 1) : null,
-        serverProposalId: server.id, type: server.type, targetPlanId: server.targetPlanId, beforePlan: server.beforePlan,
-        sourceEtag: server.sourceEtag, operations: server.operations, assumptions: server.assumptions,
-        summary: server.summary, expiresAt: server.expiresAt,
-      } : reply.proposal ? { id: uid(), messageId: assistant.id, plan: reply.proposal, status: 'pending', baseRevision: reply.baseRevision ?? null } : null;
-      if (isLive) {
-        if (proposal) {
-          await db.proposals.put(proposal);
-          if (activeConversationId === turnConversationId) setServerProposals(existing => [...existing.filter(p => p.id !== proposal.id), proposal]);
+    const turnScope = scope.current;
+    const turnDatabase = db;
+    let needsRecovery = false;
+    sendLock.current = true; setSending(true); setText('');
+    try {
+      const user: Message = { id: uid(), role: 'user', text: content, createdAt: new Date().toISOString() };
+      const saved = await run(async () => {
+        const isLive = mode === 'chatgpt' && userId && navigator.onLine;
+        const adapter = isLive ? liveCoach(userId!, trainingDataReady) : sampleCoach;
+        const pendingKey = userId && turnConversationId ? `fitcoach:${userId}:coach-pending-turn:${turnConversationId}` : '';
+        if (isLive) {
+          const stored = pendingKey ? localStorage.getItem(pendingKey) : null;
+          const parsed = stored ? JSON.parse(stored) as { conversationId: string; requestId: string; text: string } : null;
+          pendingTurn.current = parsed?.conversationId === turnConversationId && parsed.text === content ? parsed
+            : { conversationId: turnConversationId, requestId: uid(), text: content };
+          localStorage.setItem(pendingKey, JSON.stringify(pendingTurn.current));
         }
-        setConversations(existing => existing.map(item => item.id === turnConversationId ? { ...item, title: item.title === 'New conversation' ? content.slice(0, 160) : item.title, updatedAt: new Date().toISOString() } : item));
-      } else await db.transaction('rw', [db.messages, db.proposals, db.outbox], async () => {
-        await db.messages.bulkPut([user, assistant]);
-        if (proposal) await db.proposals.add(proposal);
-        await enqueueChange('messages', user.id, 'upsert', user); await enqueueChange('messages', assistant.id, 'upsert', assistant);
-        if (proposal) await enqueueChange('proposals', proposal.id, 'upsert', proposal);
+        const reply = await adapter.respond({ messages: [...turnMessages, user], profile, plan: plans.find(p => p.active), recentWorkouts: sessions.filter(s => s.status === 'completed').slice(-5),
+          conversationId: isLive ? turnConversationId : undefined, requestId: isLive ? pendingTurn.current?.requestId : undefined });
+        const assistant = { ...assistantMessage(reply.text, isLive ? 'chatgpt' : 'sample'), id: reply.persistedMessageId ?? uid() };
+        const persistedUser = reply.persistedUserMessageId ? { ...user, id: reply.persistedUserMessageId } : user;
+        if (isLive) {
+          if (reply.replayed && userId) {
+            const conversation = await backendRequest<{ messages: Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: string }> }>(userId, `coach/conversations/${turnConversationId}?limit=100`);
+            if (scope.current === turnScope) setServerMessages(conversation.messages.map(message => ({ id: message.id, role: message.role, text: message.text,
+              createdAt: message.createdAt, source: message.role === 'assistant' ? 'chatgpt' : undefined })));
+          } else if (scope.current === turnScope) setServerMessages(existing => [...existing, persistedUser, assistant]);
+          if (pendingKey && localStorage.getItem(pendingKey) === JSON.stringify(pendingTurn.current)) localStorage.removeItem(pendingKey);
+          pendingTurn.current = null;
+        }
+        const server = reply.serverProposal;
+        const proposal: Proposal | null = server ? {
+          id: uid(), messageId: assistant.id, plan: server.plan, status: 'pending',
+          baseRevision: server.type === 'modify' ? Math.max(0, server.plan.revision - 1) : null,
+          serverProposalId: server.id, type: server.type, targetPlanId: server.targetPlanId, beforePlan: server.beforePlan,
+          sourceEtag: server.sourceEtag, operations: server.operations, assumptions: server.assumptions,
+          summary: server.summary, expiresAt: server.expiresAt,
+        } : reply.proposal ? { id: uid(), messageId: assistant.id, plan: reply.proposal, status: 'pending', baseRevision: reply.baseRevision ?? null } : null;
+        if (isLive) {
+          if (proposal && scope.current === turnScope) {
+            await turnDatabase.proposals.put(proposal);
+            if (scope.current === turnScope) setServerProposals(existing => [...existing.filter(p => p.id !== proposal.id), proposal]);
+          }
+          if (scope.current === turnScope) setConversations(existing => existing.map(item => item.id === turnConversationId ? { ...item, title: item.title === 'New conversation' ? content.slice(0, 160) : item.title, updatedAt: new Date().toISOString() } : item));
+        } else await turnDatabase.transaction('rw', [turnDatabase.messages, turnDatabase.proposals, turnDatabase.outbox], async () => {
+          await turnDatabase.messages.bulkPut([user, assistant]);
+          if (proposal) await turnDatabase.proposals.add(proposal);
+          await enqueueChange('messages', user.id, 'upsert', user, turnDatabase); await enqueueChange('messages', assistant.id, 'upsert', assistant, turnDatabase);
+          if (proposal) await enqueueChange('proposals', proposal.id, 'upsert', proposal, turnDatabase);
+        });
       });
-    });
-    if (!saved) setText(content);
-    setSending(false);
+      if (!saved) {
+        needsRecovery = mode === 'chatgpt';
+        if (scope.current === turnScope) setText(draft => draft || content);
+      } else if (scope.current === turnScope) setRecovery(null);
+    } finally {
+      sendLock.current = false; setSending(false);
+      if (needsRecovery || scope.current !== turnScope) setRecoveryVersion(version => version + 1);
+    }
   };
   return <div className="page coach-page"><div className="coach-top"><div><span className="eyebrow">A LITTLE DIRECTION</span><h1>Your corner.</h1></div><button className="button secondary" aria-label="New conversation" disabled={sending || mode !== 'chatgpt' || !userId || !navigator.onLine} onClick={() => void run(async () => {
     if (!userId) throw new Error('Sign in online to create a Coach conversation.');
@@ -255,7 +296,11 @@ export function Coach() {
         })}>Reject changes</button></> : <><button className="button primary" onClick={() => setReview(proposal)}>Review & edit<ArrowRight size={16} /></button><button className="icon-button" aria-label="Reject proposal" onClick={() => run(() => putLocalChange('proposals', { ...proposal, status: 'rejected' as const }, db.proposals))}><X size={18} /></button></>}</div> : <span className="proposal-status">{proposal.status === 'applied' ? <><Check size={15} />Applied to your plan</> : 'Proposal dismissed or no longer valid'}</span>}</div>}
       </div></article>;
     })}{sending && <div className="message assistant"><span className="message-avatar"><Sparkles size={17} /></span><div className="typing" aria-label="Preparing Coach response"><i /><i /><i /></div></div>}<div ref={bottom} /></div>
-    <form className="chat-composer" onSubmit={e => { e.preventDefault(); void send(); }}><label className="sr-only" htmlFor="chat-input">Message Coach</label><textarea id="chat-input" value={text} maxLength={5000} onChange={e => setText(e.target.value)} placeholder="Let’s talk about your training…" rows={1} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} /><button aria-label="Send message" className="send-button" disabled={sending || mode === 'checking' || (mode === 'chatgpt' && !activeConversationId) || !text.trim()} type="submit"><Send size={18} /></button></form><p className="composer-caption"><MessageCircle size={12} />{mode === 'chatgpt' ? 'Using your ChatGPT plan · saved to your account' : 'Sample conversation · saved on this device'}</p>
+    {recovery && <p role="status">{recovery === 'started' ? 'Coach is still processing your saved message. Checking for a reply…'
+      : recovery === 'failed' ? 'Your message is saved. Retry it with Send, or edit it to send a new message.'
+      : recovery === 'checking' ? 'Checking your saved message…'
+      : 'Your message is kept. Waiting to check its status before sending again.'}</p>}
+    <form className="chat-composer" onSubmit={e => { e.preventDefault(); void send(); }}><label className="sr-only" htmlFor="chat-input">Message Coach</label><textarea id="chat-input" value={text} maxLength={5000} onChange={e => setText(e.target.value)} placeholder="Let’s talk about your training…" rows={1} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} /><button aria-label="Send message" className="send-button" disabled={sending || (recovery !== null && recovery !== 'failed') || mode === 'checking' || (mode === 'chatgpt' && !activeConversationId) || !text.trim()} type="submit"><Send size={18} /></button></form><p className="composer-caption"><MessageCircle size={12} />{mode === 'chatgpt' ? 'Using your ChatGPT plan · saved to your account' : 'Sample conversation · saved on this device'}</p>
     {review && <PlanEditor initial={review.plan} saveLabel="Apply reviewed plan" onClose={() => setReview(null)} onSave={async plan => {
       if (await run(() => applyProposal({ ...review, plan }), 'Reviewed plan applied')) setReview(null);
     }} />}
