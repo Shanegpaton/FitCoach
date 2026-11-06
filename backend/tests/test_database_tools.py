@@ -7,6 +7,10 @@ from pydantic import ValidationError
 from sqlalchemy.dialects import postgresql
 
 from backend.agent.inference import InferenceError
+from backend.agent.plan_proposal_service import ModifyRequest
+from backend.agent.plan_proposals import apply_operations, operations_adapter
+from backend.domain import Plan
+from backend.tests.fixtures import plan
 from backend.agent.tools.database import (
     ARG_MODELS, SessionSearch, TOOL_SPECS, _fingerprint, _next_cursor, _offset,
     _session_statement, run_database_tool,
@@ -48,6 +52,42 @@ def test_tool_specs_are_closed_and_have_matching_models():
         assert item['strict'] is True
         assert params['additionalProperties'] is False
         assert set(params['properties']) == set(params['required'])
+
+
+def test_plan_edit_tool_advertises_flat_operations_accepted_by_validator():
+    params = next(tool['parameters'] for tool in TOOL_SPECS
+                  if tool['name'] == 'propose_plan_changes')
+    operations = params['properties']['operations']
+    assert operations['type'] == 'array'
+    assert operations['minItems'] == 1 and operations['maxItems'] == 20
+    # Each item must be an operation object, not another array.
+    variants = operations['items']['anyOf']
+    advertised_types = set()
+    for variant in variants:
+        definition = params['$defs'][variant['$ref'].removeprefix('#/$defs/')]
+        assert definition['type'] == 'object'
+        assert definition['additionalProperties'] is False
+        advertised_types.update(definition['properties']['type']['enum'])
+    assert advertised_types == {variant['properties']['type']['const']
+                               for variant in operations_adapter.json_schema()['$defs'].values()
+                               if 'type' in variant.get('properties', {})}
+
+    args = ModifyRequest.model_validate_json(json.dumps({
+        'planId': 'plan', 'assumptions': [], 'operations': [
+            {'type': 'rename_plan', 'name': 'Revised strength plan'},
+            {'type': 'update_prescription', 'workoutId': 'workout-a', 'blockId': 'block-a',
+             'sets': [{'id': 'set-a', 'kind': 'working', 'targetReps': 5,
+                       'targetKg': None, 'chainId': None}], 'restSeconds': 180},
+        ],
+    }))
+    source = Plan.model_validate(plan())
+    before = source.model_dump()
+    preview = apply_operations(source, operations_adapter.validate_python(args.operations),
+                               {'ex-squat', 'ex-pushup'})
+    assert preview.name == 'Revised strength plan'
+    assert preview.workouts[0].blocks[0].sets[0].targetReps == 5
+    assert preview.workouts[0].blocks[0].restSeconds == 180
+    assert source.model_dump() == before
 
 
 def test_cursor_is_bound_to_filters():

@@ -115,7 +115,7 @@ TOOL_SPECS.extend([
         ['plan', 'assumptions'], _plan_schema.get('$defs', {})),
     _typed_spec('propose_plan_changes', 'Propose typed operations against one of the user’s plans. This tool does not save changes.', {
         'planId': {'type': 'string'}, 'operations': {'type': 'array',
-            'items': {key: value for key, value in _ops_schema.items() if key != '$defs'}, 'minItems': 1, 'maxItems': 20},
+            'items': _ops_schema['items'], 'minItems': 1, 'maxItems': 20},
         'assumptions': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 10}},
         ['planId', 'operations', 'assumptions'], _ops_schema.get('$defs', {})),
 ])
