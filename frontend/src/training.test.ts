@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { catalog, starterPlan } from './catalog';
 import { defaultProfile, toKg, fromKg, newSet } from './domain';
-import { completedStats, lastPerformance, nextSet, restAfterSet, scheduledWorkout, startSession, timerRemaining, weeklyStats } from './training';
+import { completedStats, lastPerformance, nextSet, planWorkoutForDate, restAfterSet, scheduledWorkout, startSession, timerRemaining, weeklyStats } from './training';
 
 describe('workout scheduling and snapshots', () => {
   it('schedules weekdays without silently making a rest day a training day', () => {
@@ -21,6 +21,19 @@ describe('workout scheduling and snapshots', () => {
     const plan = starterPlan(defaultProfile); plan.schedule = 'rotation'; plan.cursor = 1;
     expect(scheduledWorkout(plan, '2026-10-13')?.id).toBe(plan.workouts[1].id);
     expect(scheduledWorkout(plan, '2026-10-14')?.id).toBe(plan.workouts[1].id);
+  });
+  it('planWorkoutForDate determines scheduled days and rest days for calendar views', () => {
+    const plan = starterPlan(defaultProfile);
+    // Weekly plan (Mon/Wed/Fri)
+    expect(planWorkoutForDate(plan, '2026-10-12')?.name).toBe('Full body A');
+    expect(planWorkoutForDate(plan, '2026-10-13')).toBeUndefined(); // Tuesday is rest day
+    expect(planWorkoutForDate(plan, '2026-10-14')?.name).toBe('Full body B');
+    expect(planWorkoutForDate(undefined, '2026-10-12')).toBeUndefined(); // Inactive plan
+
+    // Rotation plan only presents workout for today
+    const rotationPlan = { ...starterPlan(defaultProfile), schedule: 'rotation' as const, cursor: 0 };
+    expect(planWorkoutForDate(rotationPlan, '2026-10-12', [], '2026-10-12')?.name).toBe('Full body A');
+    expect(planWorkoutForDate(rotationPlan, '2026-10-13', [], '2026-10-12')).toBeUndefined(); // Other days are rest/open
   });
   it('snapshotting a session isolates it from later plan and catalog edits', () => {
     const plan = starterPlan(defaultProfile); const exercises = structuredClone(catalog);

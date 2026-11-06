@@ -9,6 +9,14 @@ export function scheduledWorkout(plan: Plan, date: string, overrides: ScheduleOv
     !overrides.some(o => o.planId === plan.id && o.workoutId === w.id && o.originalDate === date));
 }
 
+export function planWorkoutForDate(plan: Plan | undefined, date: string, overrides: ScheduleOverride[] = [], today = localDate()): Workout | undefined {
+  if (!plan) return undefined;
+  if (plan.schedule === 'rotation') {
+    return date === today ? plan.workouts[plan.cursor % plan.workouts.length] : undefined;
+  }
+  return scheduledWorkout(plan, date, overrides);
+}
+
 export function startSession(plan: Plan, workout: Workout, exercises: Exercise[], date = localDate()): Session {
   if (!workout.blocks.length) throw new Error('Add an exercise before starting this workout.');
   return {
