@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TrainingDB, applyProposal, cacheApprovedProposal, createSession, enqueueChange, exportBackup, finishSession, hasLegacyData, importBackup, importLegacyData, initialize, savePlan, syncRootId } from './db';
+import { TrainingDB, applyProposal, cacheApprovedProposal, cacheApprovedWorkout, createSession, enqueueChange, exportBackup, finishSession, hasLegacyData, importBackup, importLegacyData, initialize, savePlan, syncRootId } from './db';
 import { catalog, starterPlan } from './catalog';
 import { backupSchema, defaultProfile, uid, type Proposal } from './domain';
 import { startSession } from './training';
@@ -135,5 +135,27 @@ describe('backup safety and proposal review', () => {
     await expect(cacheApprovedProposal(proposal, proposal.plan, '"2"', owned)).rejects.toThrow(/unsynchronized/);
     expect((await owned.plans.get(plan.id))?.name).toBe(plan.name);
     await owned.delete();
+  });
+});
+
+describe('approved workout history corrections', () => {
+  it.each(['clean', 'pending', 'newer'] as const)('preserves local data when caching a correction: %s', async situation => {
+    const account = new TrainingDB(`workout-edit-${uid()}`, 'user-a');
+    try {
+      const p = starterPlan(defaultProfile);
+      const original = { ...startSession(p, p.workouts[0], catalog), status: 'completed' as const,
+        completedAt: new Date().toISOString(), notes: 'Original history' };
+      const edited = { ...original, notes: 'Coach correction' };
+      await account.sessions.put(original);
+      const rootId = syncRootId('user-a', 'sessions', original.id);
+      await account.sync.put({ id: rootId, userId: 'user-a', kind: 'root', entity: 'sessions',
+        entityId: original.id, etag: situation === 'newer' ? '"3"' : '"1"', version: situation === 'newer' ? 3 : 1 });
+      if (situation === 'pending') await enqueueChange('sessions', original.id, 'upsert', original, account);
+      const outboxBefore = await account.outbox.toArray();
+      await cacheApprovedWorkout(edited, '"1"', '"2"', account);
+      expect(await account.sessions.get(original.id)).toEqual(situation === 'clean' ? edited : original);
+      expect((await account.sync.get(rootId))?.etag).toBe(situation === 'clean' ? '"2"' : situation === 'newer' ? '"3"' : '"1"');
+      expect(await account.outbox.toArray()).toEqual(outboxBefore);
+    } finally { await account.delete(); }
   });
 });

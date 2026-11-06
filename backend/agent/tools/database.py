@@ -17,18 +17,20 @@ try:
     from ... import schema as tables
     from ...database import set_identity
     from ...store import Store
-    from ...domain import Plan
+    from ...domain import Plan, Session
     from ..inference import InferenceError
     from ..plan_proposal_service import CreateRequest, ModifyRequest, create_proposal, modify_proposal
     from ..plan_proposals import operations_adapter
+    from ..workout_proposals import WorkoutEditRequest, propose_workout_changes
 except ImportError:  # backend/ as the deployment project root
     import schema as tables
     from database import set_identity
     from store import Store
-    from domain import Plan
+    from domain import Plan, Session
     from agent.inference import InferenceError
     from agent.plan_proposal_service import CreateRequest, ModifyRequest, create_proposal, modify_proposal
     from agent.plan_proposals import operations_adapter
+    from agent.workout_proposals import WorkoutEditRequest, propose_workout_changes
 
 MAX_RESULT_CHARS = 24_000
 MAX_PAGE_OFFSET = 5_000
@@ -100,6 +102,7 @@ def _responses_schema(value):
 
 _plan_schema = _responses_schema(_plan_schema)
 _ops_schema = _responses_schema(_ops_schema)
+_session_schema = _responses_schema(Session.model_json_schema(ref_template='#/$defs/{model}'))
 if 'description' not in _plan_schema.get('required', []):
     _plan_schema.setdefault('required', []).append('description')
 def _typed_spec(name, description, properties, required, definitions):
@@ -109,6 +112,11 @@ def _typed_spec(name, description, properties, required, definitions):
 
 
 TOOL_SPECS.extend([
+    _typed_spec('propose_workout_changes',
+        'Propose edits to any recorded fields of one completed workout, including exercises, sets, reps, load, effort, notes, order, and dates. Read its full snapshot with get_workout_sessions first; copy unchanged fields and IDs exactly, use kg for loads, and keep status completed. This tool stores a before/after draft only; the user must accept or reject it.', {
+        'sessionId': {'type': 'string', 'minLength': 1, 'maxLength': 200},
+        'session': {key: value for key, value in _session_schema.items() if key != '$defs'}},
+        ['sessionId', 'session'], _session_schema.get('$defs', {})),
     _typed_spec('propose_training_plan', 'Create and validate a complete new plan preview. This tool does not save the plan.', {
         'plan': {key: value for key, value in _plan_schema.items() if key != '$defs'},
         'assumptions': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 10}},
@@ -248,6 +256,7 @@ ARG_MODELS = {
     'get_training_plans': RecordIds,
     'search_exercises': ExerciseSearch,
     'propose_training_plan': CreateRequest,
+    'propose_workout_changes': WorkoutEditRequest,
     'propose_plan_changes': ModifyRequest,
 }
 
@@ -449,6 +458,9 @@ async def _search_exercises(data: Store, args: ExerciseSearch):
 
 async def run_database_tool(name: str, arguments: str, database, user_id: UUID, today: date) -> str:
     """Validate model arguments, then read account data or store a proposal draft."""
+    if name == 'propose_workout_changes':
+        result = await propose_workout_changes(database, user_id, arguments)
+        return json.dumps(jsonable_encoder(result), separators=(',', ':'), allow_nan=False)
     if name == 'propose_training_plan':
         result = await create_proposal(database, user_id, arguments)
         return json.dumps(jsonable_encoder(result), separators=(',', ':'), allow_nan=False)

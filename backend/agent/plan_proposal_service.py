@@ -11,14 +11,14 @@ try:
     from ..conversations import guard_proposal
     from .. import schema as tables
     from ..database import lock_user_mutations, set_identity
-    from ..domain import Plan
+    from ..domain import Plan, Session
     from ..store import Store, etag
     from .plan_proposals import operations_adapter, apply_operations
 except ImportError:
     from conversations import guard_proposal
     import schema as tables
     from database import lock_user_mutations, set_identity
-    from domain import Plan
+    from domain import Plan, Session
     from store import Store, etag
     from agent.plan_proposals import operations_adapter, apply_operations
 
@@ -199,9 +199,11 @@ async def approve_proposal(database, user_id: UUID, proposal_id: UUID) -> dict:
             if not row:
                 raise HTTPException(404, 'Proposal not found')
             payload = json.loads(row['proposal_json'])
+            workout_edit = row['proposal_type'] == 'session_modify'
+            resource, field, model = ('sessions', 'session', Session) if workout_edit else ('plans', 'plan', Plan)
             if row['status'] == 'approved':
-                current, current_row = await Store(session, user_id).read('plans', payload['plan']['id'])
-                result = {'proposal': payload | {'status': 'approved'}, 'plan': current, 'etag': etag(current_row), 'replayed': True}
+                current, current_row = await Store(session, user_id).read(resource, payload[field]['id'])
+                result = {'proposal': payload | {'status': 'approved'}, field: current, 'etag': etag(current_row), 'replayed': True}
             elif row['status'] != 'pending':
                 raise HTTPException(409, f"Proposal is {row['status']}")
             elif row['expires_at'] <= datetime.now(timezone.utc):
@@ -209,16 +211,17 @@ async def approve_proposal(database, user_id: UUID, proposal_id: UUID) -> dict:
                 stale = True
             else:
                 data = Store(session, user_id)
-                if row['proposal_type'] == 'modify':
-                    current = await data.root(tables.training_plans, row['target_plan_id'], lock=True)
+                if row['proposal_type'] in ('modify', 'session_modify'):
+                    table, target = (tables.workout_sessions, row['target_session_id']) if workout_edit else (tables.training_plans, row['target_plan_id'])
+                    current = await data.root(table, target, lock=True)
                     if current is None or etag(current) != row['source_etag']:
                         await session.execute(sa.text("UPDATE fitcoach.coach_proposals SET status='invalidated' WHERE proposal_id=:id"), {'id': proposal_id})
                         stale = True
                 if not stale:
                     try:
-                        plan = Plan.model_validate(payload['plan'])
+                        document = model.model_validate(payload[field])
                         async with session.begin_nested():
-                            saved, saved_row, _ = await data.put('plans', plan, row['source_etag'], create_only=row['proposal_type'] == 'create')
+                            saved, saved_row, _ = await data.put(resource, document, row['source_etag'], create_only=row['proposal_type'] == 'create')
                     except HTTPException as error:
                         if error.status_code in (404, 409, 412, 422, 428):
                             await session.execute(sa.text("UPDATE fitcoach.coach_proposals SET status='invalidated' WHERE proposal_id=:id"), {'id': proposal_id})
@@ -228,7 +231,7 @@ async def approve_proposal(database, user_id: UUID, proposal_id: UUID) -> dict:
                     else:
                         await session.execute(sa.text("UPDATE fitcoach.coach_proposals SET status='approved' WHERE proposal_id=:id"), {'id': proposal_id})
                         payload['status'] = 'approved'
-                        result = {'proposal': payload, 'plan': saved, 'etag': etag(saved_row), 'replayed': False}
+                        result = {'proposal': payload, field: saved, 'etag': etag(saved_row), 'replayed': False}
     if stale:
-        raise HTTPException(409, 'Proposal expired, references unavailable data, or its plan changed. Create a fresh proposal.')
+        raise HTTPException(409, 'Proposal expired, references unavailable data, or the workout or plan changed. Create a fresh proposal.')
     return result

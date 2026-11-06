@@ -206,6 +206,25 @@ export async function cacheApprovedProposal(proposal: Proposal, plan: Plan, etag
   });
 }
 
+/** Cache a committed history correction only while the local root still matches
+ * its source. Edits made during approval remain in the outbox for normal conflict
+ * resolution; the server proposal retains the original completed snapshot. */
+export async function cacheApprovedWorkout(session: Session, sourceEtag: string, etag: string, database = db) {
+  const validated = sessionSchema.parse(session);
+  if (!database.ownerId) throw new Error('Sign in to accept a workout edit.');
+  await database.transaction('rw', [database.sessions, database.sync, database.outbox], async () => {
+    const pending = await database.outbox.where('[userId+entity+entityId]')
+      .equals([database.ownerId!, 'sessions', validated.id]).count();
+    const rootId = syncRootId(database.ownerId!, 'sessions', validated.id);
+    const previous = await database.sync.get(rootId);
+    if (pending || previous?.etag !== sourceEtag) return;
+    await database.sessions.put(validated);
+    await database.sync.put({ ...previous, id: rootId, userId: database.ownerId!, kind: 'root',
+      entity: 'sessions', entityId: validated.id, etag, version: Number(etag.replaceAll('"', '')),
+      remoteDeleted: false, updatedAt: new Date().toISOString() });
+  });
+}
+
 export async function exportBackup(database = db): Promise<Backup> {
   return database.transaction('r', database.tables, async () => backupSchema.parse({
     version: 1, exportedAt: new Date().toISOString(), profile: await database.profile.get('profile'),

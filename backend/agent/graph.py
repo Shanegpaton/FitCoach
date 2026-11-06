@@ -43,7 +43,7 @@ def build_coach_graph(respond: Callable[[list[dict]], Awaitable[dict]],
             raise InferenceError(502, 'Coach requested an invalid tool. Try again.')
         if len(call['arguments'].encode('utf-8')) > MAX_TOOL_ARGUMENT_BYTES:
             raise InferenceError(502, 'Coach tool arguments were too large. Narrow the request and try again.')
-        if state.get('proposal') and call['name'] in ('propose_training_plan', 'propose_plan_changes'):
+        if state.get('proposal') and call['name'] in ('propose_training_plan', 'propose_plan_changes', 'propose_workout_changes'):
             raise InferenceError(502, 'Coach already created a proposal in this request. Review that proposal before asking for another.')
         result = await run_tool(call['name'], call['arguments'])
         total = state.get('tool_bytes', 0) + len(result.encode('utf-8'))

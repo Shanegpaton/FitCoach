@@ -1,11 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
 
-function mockConversations(context: import('@playwright/test').BrowserContext) {
+function mockConversations(context: import('@playwright/test').BrowserContext, origin = 'http://localhost:4173') {
   const items: Array<{ id: string; title: string; createdAt: string; updatedAt: string }> = [];
   const messages = new Map<string, Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: string; metadata?: object }>>();
   context.route('https://api.example.com/v1/coach/conversations**', async route => {
     const path = new URL(route.request().url()).pathname; const method = route.request().method();
-    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173', 'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS' };
+    const headers = { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS' };
     if (method === 'OPTIONS') return route.fulfill({ status: 204, headers });
     if (method === 'POST') {
       const now = new Date().toISOString(); const item = { id: `conversation-${items.length + 1}`, title: 'New conversation', createdAt: now, updatedAt: now };
@@ -76,6 +76,16 @@ async function openApp(page: Page) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Skip for now' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
+}
+
+async function waitForCoachSync(page: Page) {
+  // Onboarding can finish while bootstrap is running. A foreground event asks
+  // the coordinator to upload that local change once the current pass finishes.
+  await expect.poll(async () => {
+    if (await page.getByText(/Your synced training data is available to Coach/).isVisible()) return true;
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    return false;
+  }).toBe(true);
 }
 
 async function makePlan(page: Page) {
@@ -256,7 +266,8 @@ test('live Coach renders a durable structured proposal and requires sync before 
 });
 
 test('live Coach approval commits through the API and refreshes the local plan cache', async ({ page, context }) => {
-  mockConversations(context);
+  const origin = test.info().project.use.baseURL!;
+  mockConversations(context, origin);
   const proposal = { id: '81d560ac-5ef1-4e55-a6b9-6f393bf45547', type: 'create', targetPlanId: null,
     sourceEtag: null, beforePlan: null, operations: [], assumptions: [], summary: 'New plan: Upper day.',
     createdAt: '2026-10-21T12:00:00Z', expiresAt: '2026-10-22T12:00:00Z', status: 'pending',
@@ -266,10 +277,10 @@ test('live Coach approval commits through the API and refreshes the local plan c
           sets: [{ id: 'approved-set', kind: 'working', targetReps: 5, targetKg: null, chainId: null }] }] }] } };
   let approved = false;
   await context.route(/^https:\/\/api\.example\.com\/v1\/sync\/changes/, route => route.fulfill({ json: { items: [], cursor: 0, highWater: 0, hasMore: false },
-    headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173', 'Access-Control-Allow-Headers': 'authorization,content-type',
+    headers: { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Headers': 'authorization,content-type',
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } }));
   await context.route(/^https:\/\/api\.example\.com\/v1\/sync\/mutations/, async route => {
-    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173', 'Access-Control-Allow-Headers': 'authorization,content-type',
+    const headers = { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Headers': 'authorization,content-type',
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
     const mutations = route.request().postDataJSON().mutations as Array<{ mutationId: string; resource: string; id: string; expectedEtag?: string; payload: unknown }>;
@@ -282,23 +293,24 @@ test('live Coach approval commits through the API and refreshes the local plan c
     const body = path.endsWith('/connection') ? { connected: true, planUsageGranted: true }
       : path.endsWith('/coach') ? { text: 'Review this plan before saving.', proposal, messageId: 'assistant-proposal', userMessageId: 'user-proposal' }
       : { connected: true, planUsageGranted: true };
-    return route.fulfill({ json: body, headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+    return route.fulfill({ json: body, headers: { 'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } });
   });
   await context.route('https://api.example.com/v1/coach/proposals/**', async route => {
     if (route.request().url().endsWith('/approve')) {
       approved = true;
       return route.fulfill({ json: { proposal: { ...proposal, status: 'approved' }, plan: proposal.plan,
-        etag: '"1"', replayed: false }, headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+        etag: '"1"', replayed: false }, headers: { 'Access-Control-Allow-Origin': origin,
           'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } });
     }
     return route.fulfill({ json: { ...proposal, status: approved ? 'approved' : 'pending' },
-      headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173', 'Access-Control-Allow-Headers': 'authorization,content-type',
+      headers: { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Headers': 'authorization,content-type',
         'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } });
   });
   await openApp(page);
   await page.getByRole('link', { name: 'Coach', exact: true }).click();
   await expect(page.getByText('ChatGPT Coach', { exact: true })).toBeVisible();
+  await waitForCoachSync(page);
   await page.getByLabel('Message Coach').fill('Build a strength plan.');
   await page.getByRole('button', { name: 'Send message' }).click();
   const approve = page.getByRole('button', { name: 'Approve changes' });
@@ -524,4 +536,101 @@ test.describe('Coach interrupted requests', () => {
     await expect(page.getByLabel('Message Coach')).toHaveValue('');
     expect(sends).toBe(1);
   });
+});
+
+test.describe('Coach workout corrections', () => {
+  // Mock API routes must stay visible to Playwright after reload. The separate
+  // offline logging test above exercises the real service worker.
+  test.use({ serviceWorkers: 'block' });
+for (const decision of ['accept', 'reject', 'stale'] as const) {
+  test(`Coach workout edit preview survives reload and handles ${decision}`, async ({ page, context }) => {
+    const origin = test.info().project.use.baseURL!;
+    const conversations = mockConversations(context, origin);
+    const headers = { 'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
+    const original = { id: 'history-edit', planId: 'old-plan', workoutId: 'old-workout', name: 'Recorded squat workout',
+      date: '2026-10-11', startedAt: '2026-10-11T13:00:00.000Z', completedAt: '2026-10-11T14:00:00.000Z',
+      status: 'completed', notes: 'Original workout notes', timer: null,
+      blocks: [{ id: 'squat-block', exerciseId: 'ex-squat', name: 'Recorded squat', loadMode: 'external', restSeconds: 120,
+        supersetId: null, notes: '', sets: [{ id: 'recorded-set', kind: 'working', targetReps: 8, targetKg: null,
+          chainId: null, kg: 40, reps: 8, effort: 7, done: true }] }] };
+    const edited = structuredClone(original);
+    edited.blocks[0].sets[0].reps = 5;
+    edited.notes = 'Corrected recorded reps';
+    const proposal = { id: 'workout-proposal', type: 'session_modify', targetSessionId: original.id,
+      sourceEtag: '"1"', beforeSession: original, session: edited, summary: 'Correct last workout reps.',
+      createdAt: '2026-11-06T12:00:00Z', expiresAt: '2099-11-07T12:00:00Z', status: 'pending' };
+    let stored = original;
+    let approved = false;
+    let rejected = false;
+    let stale = false;
+    await context.route(/^https:\/\/api\.example\.com\/v1\/sync\/changes/, route => route.fulfill({ headers,
+      json: { items: [{ resource: 'sessions', id: original.id, sequence: approved ? 2 : 1, version: approved ? 2 : 1,
+        etag: approved ? '"2"' : '"1"', deleted: false, document: stored }], cursor: approved ? 2 : 1,
+        highWater: approved ? 2 : 1, hasMore: false } }));
+    await context.route(/^https:\/\/api\.example\.com\/v1\/sync\/mutations/, async route => {
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      const mutations = route.request().postDataJSON().mutations as Array<{ mutationId: string; resource: string; id: string; payload: unknown }>;
+      return route.fulfill({ headers, json: { results: mutations.map(item => ({ ...item, status: 201,
+        etag: '"1"', document: item.payload, error: null })) } });
+    });
+    await context.route('https://api.example.com/v1/chatgpt/**', async route => {
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      const path = new URL(route.request().url()).pathname;
+      if (!path.endsWith('/coach')) return route.fulfill({ headers, json: { connected: true, planUsageGranted: true } });
+      const conversationId = route.request().postDataJSON().conversationId as string;
+      conversations.messages.set(conversationId, [
+        { id: 'edit-user', role: 'user', text: 'Change my last squat set to 5 reps.', createdAt: proposal.createdAt },
+        { id: 'edit-assistant', role: 'assistant', text: 'Review this workout correction.', createdAt: proposal.createdAt,
+          metadata: { artifacts: [{ id: proposal.id, type: 'workout_edit_proposal' }] } },
+      ]);
+      return route.fulfill({ headers, json: { text: 'Review this workout correction.', proposal,
+        messageId: 'edit-assistant', userMessageId: 'edit-user' } });
+    });
+    await context.route('https://api.example.com/v1/coach/proposals/**', async route => {
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith('/approve')) {
+        if (decision === 'stale') {
+          stale = true;
+          return route.fulfill({ status: 409, headers, json: { detail: 'Workout changed. Create a fresh proposal.' } });
+        }
+        approved = true; stored = edited;
+        return route.fulfill({ headers, json: { proposal: { ...proposal, status: 'approved' }, session: edited, etag: '"2"', replayed: false } });
+      }
+      if (path.endsWith('/reject')) rejected = true;
+      return route.fulfill({ headers, json: { ...proposal, status: approved ? 'approved' : rejected ? 'rejected' : stale ? 'invalidated' : 'pending' } });
+    });
+    await openApp(page);
+    await page.getByRole('link', { name: 'Coach', exact: true }).click();
+    await waitForCoachSync(page);
+    await page.getByLabel('Message Coach').fill('Change my last squat set to 5 reps.');
+    await page.getByRole('button', { name: 'Send message' }).click();
+    const card = page.getByLabel('Workout edit proposal');
+    await expect(card).toBeVisible();
+    await expect(card.getByRole('cell', { name: '5', exact: true })).toBeVisible();
+    expect(stored.blocks[0].sets[0].reps).toBe(8);
+    await page.reload();
+    await expect(card).toBeVisible();
+    await card.getByText('Original workout', { exact: true }).click();
+    await expect(card.getByRole('cell', { name: '8', exact: true })).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath('workout-edit-review.png'), fullPage: true });
+    if (decision === 'reject') {
+      await card.getByRole('button', { name: 'Reject changes' }).click();
+      await expect(card.getByText('Workout edit rejected', { exact: true })).toBeVisible();
+      expect(rejected).toBe(true); expect(approved).toBe(false);
+    } else {
+      await expect(card.getByRole('button', { name: 'Accept changes' })).toBeEnabled();
+      await card.getByRole('button', { name: 'Accept changes' }).click();
+      await expect(card.getByText(decision === 'accept' ? 'Applied to workout history' : 'Workout edit invalidated', { exact: true })).toBeVisible();
+      expect(approved).toBe(decision === 'accept');
+    }
+    expect(stored.blocks[0].sets[0].reps).toBe(decision === 'accept' ? 5 : 8);
+    if (decision === 'accept') {
+      await page.getByRole('link', { name: 'History', exact: true }).click();
+      await expect(page.getByText('Recorded squat workout', { exact: true })).toBeVisible();
+    }
+  });
+}
+
 });

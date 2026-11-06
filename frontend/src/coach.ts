@@ -8,7 +8,13 @@ export interface ServerPlanProposal {
   plan: Plan; beforePlan: Plan | null; operations: Array<Record<string, unknown>>; assumptions: string[];
   summary: string; createdAt: string; expiresAt: string; status: 'pending' | 'approved' | 'rejected' | 'expired' | 'invalidated';
 }
-export interface ChatReply { text: string; proposal?: Plan; baseRevision?: number | null; serverProposal?: ServerPlanProposal | null; persistedMessageId?: string; persistedUserMessageId?: string; replayed?: boolean }
+export interface ServerWorkoutProposal {
+  id: string; type: 'session_modify'; targetSessionId: string; sourceEtag: string;
+  session: Session; beforeSession: Session; summary: string; createdAt: string; expiresAt: string;
+  status: ServerPlanProposal['status'];
+}
+export type ServerProposal = ServerPlanProposal | ServerWorkoutProposal;
+export interface ChatReply { text: string; proposal?: Plan; baseRevision?: number | null; serverProposal?: ServerProposal | null; persistedMessageId?: string; persistedUserMessageId?: string; replayed?: boolean }
 export interface ChatAdapter { respond(request: ChatRequest): Promise<ChatReply> }
 
 export const sampleCoach: ChatAdapter = {

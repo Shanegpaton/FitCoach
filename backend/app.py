@@ -359,7 +359,7 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
         if claim['replay']:
             proposal = None
             refs = claim.get('metadata', {}).get('artifacts', [])
-            if refs and refs[0].get('type') == 'training_plan_proposal':
+            if refs and refs[0].get('type') in ('training_plan_proposal', 'workout_edit_proposal'):
                 proposal = await read_proposal(database, user, UUID(refs[0]['id']))
             return {'text': claim['text'], 'proposal': proposal, 'replayed': True,
                     'messageId': claim['assistantMessageId']}
@@ -392,7 +392,7 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                     graph = build_coach_graph(respond, run_tool, checkpointer=checkpointer)
                     result = await graph.ainvoke({'input': [{'role': m['role'], 'content': m['text']} for m in history]},
                         config={'configurable': {'thread_id': claim['threadId']}})
-                metadata = {'artifacts': ([{'id': result['proposal']['id'], 'type': 'training_plan_proposal'}]
+                metadata = {'artifacts': ([{'id': result['proposal']['id'], 'type': ('workout_edit_proposal' if result['proposal']['type'] == 'session_modify' else 'training_plan_proposal')}]
                                           if result.get('proposal') else [])}
                 assistant_message_id = await finish_turn(database, user, body.conversationId, body.requestId, result['text'], metadata, attempt_id=claim['attemptId'])
         except inference.InferenceError as exc:

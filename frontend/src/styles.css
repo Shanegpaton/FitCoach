@@ -468,3 +468,16 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 .proposal-change { display: grid; gap: 4px; margin: 10px 0; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface-raised, rgba(127,127,127,.08)); border-radius: 8px; }
 .proposal-change strong { font-size: .9rem; }
 .proposal-change span { font-size: .82rem; color: var(--muted); line-height: 1.4; }
+
+/* Completed workout proposal snapshots stay readable on narrow screens. */
+.workout-proposal details { margin-top: 14px; }
+.workout-proposal summary { cursor: pointer; padding: 12px 0; font-size: 13px; font-weight: 600; }
+.workout-proposal-snapshot { min-width: 0; }
+.workout-proposal-snapshot h4 { margin: 8px 0; font-size: 15px; }
+.workout-proposal-snapshot h5 { margin: 14px 0 6px; font-size: 13px; }
+.workout-proposal .workout-proposal-snapshot p { display: block; padding: 4px 0; border: 0; font-size: 12px; }
+.workout-proposal-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
+.workout-proposal-table { max-width: 100%; overflow-x: auto; margin: 8px 0; }
+.workout-proposal table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.workout-proposal :is(th, td) { text-align: left; padding: 9px 7px; border-bottom: 1px solid #415431; }
+.workout-proposal > p { font-size: 12px; overflow-wrap: anywhere; }

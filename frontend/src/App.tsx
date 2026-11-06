@@ -13,7 +13,7 @@ import { errorMessage } from './errors';
 import { Today } from './pages/Today';
 import { Plans } from './pages/Plans';
 import { WorkoutPage } from './pages/Workout';
-import { Coach } from './pages/Coach';
+import { Coach, CoachProvider } from './pages/Coach';
 import { Settings, Onboarding } from './pages/Settings';
 
 const History = lazy(() => import('./pages/History').then(module => ({ default: module.History })));
@@ -120,32 +120,34 @@ export function App() {
   const trainingDataReady = Boolean(syncStatus?.state === 'idle' && syncStatus.lastSuccessAt
     && !syncStatus.pending && !syncStatus.failed && !syncStatus.conflicts && !localPending);
   return <AppContext.Provider value={{ ...data, trainingDataReady, notify, run }}>
-    <div className="app-shell">
-      <header className="app-header"><Link to="/" className="brand" aria-label="FitCoach home"><span className="brand-mark">f.</span><span>fitcoach<span className="brand-dot">.</span></span></Link>
-        <div className="header-right"><Link className="local-badge" to="/settings" aria-label={`Synchronization: ${syncStatus?.message ?? syncLabel}`}><span />{auth.offlineAccess ? 'Offline · saved here' : syncLabel}</Link><Link className="icon-button" to="/settings" aria-label="Settings"><SettingsIcon size={20} /></Link><button className="icon-button" aria-label="Sign out" title={auth.email ? `Sign out ${auth.email}` : 'Sign out'} onClick={() => void auth.signOut()}><LogOut size={18} /></button></div></header>
-      {!online && <div className="connection-banner"><WifiOff size={15} /> Offline. Your training stays with you.</div>}
-      {syncStatus && (syncStatus.state === 'syncing' || syncStatus.state === 'error' || syncStatus.conflicts > 0 || syncStatus.pending > 0 || localPending > 0) && <Link to="/settings" className={`connection-banner sync-banner ${syncStatus.state === 'error' || syncStatus.conflicts ? 'sync-alert' : ''}`} role="status">{syncStatus.state === 'syncing' ? syncStatus.message : syncStatus.conflicts ? `${syncStatus.conflicts} sync conflict${syncStatus.conflicts === 1 ? '' : 's'} need your choice.` : syncStatus.failed ? `${syncStatus.failed} change${syncStatus.failed === 1 ? '' : 's'} failed to upload.` : syncStatus.state === 'error' ? syncStatus.message : `${Math.max(syncStatus.pending, localPending)} change${Math.max(syncStatus.pending, localPending) === 1 ? '' : 's'} waiting to sync.`} <span>View</span></Link>}
-      {auth.error && <div className="connection-banner" role="status">{auth.error}{online && <button onClick={() => void auth.signIn()}>Sign in again</button>}</div>}
-      {auth.offlineAccess && <div className="connection-banner">Offline access for this account. Workout logging stays local until you’re online and signed in.</div>}
-      {needRefresh && <div className="connection-banner">A new version is ready. {active ? 'Finish your workout to update.' : <button onClick={() => run(() => updateServiceWorker(true))}>Update app</button>}</div>}
-      <main id="main-content"><Routes>
-        <Route path="/auth/callback" element={<Navigate to="/" replace />} />
-        <Route path="/" element={<Today />} /><Route path="/plan" element={<Plans />} />
-        <Route path="/coach" element={<Coach />} /><Route path="/history" element={<Suspense fallback={<div className="page"><p className="field-hint">Opening your journal…</p></div>}><History /></Suspense>} />
-        <Route path="/workout/:id" element={<WorkoutPage />} /><Route path="/settings" element={<Settings />} />
-        <Route path="*" element={<div className="empty"><h1>Page not found</h1><Link to="/" className="button primary">Back to Today</Link></div>} />
-      </Routes></main>
-      {active && !location.pathname.startsWith('/workout/') && <Link className="resume-bar" to={`/workout/${active.id}`}><span className="pulse" /><div><strong>Workout in progress</strong><small>{active.name}</small></div><span>Resume<ArrowUpRight size={18} /></span></Link>}
-      <nav className="bottom-nav" aria-label="Main navigation">
-        {[['/', 'Today', Activity], ['/plan', 'Plan', LayoutGrid], ['/coach', 'Coach', Sparkles], ['/history', 'History', HistoryIcon]].map(([to, label, Icon]) => {
-          const Component = Icon as typeof Dumbbell;
-          return <NavLink key={String(to)} to={String(to)} end={to === '/'} className={({ isActive }) => isActive ? 'active' : ''}><Component size={21} /><span>{String(label)}</span></NavLink>;
-        })}
-      </nav>
-      {toast && <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <AlertCircle size={18} aria-hidden="true" /> : <Check size={18} aria-hidden="true" />}<span>{toast.message}</span><button type="button" aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={16} aria-hidden="true" /></button></div>}
-      {!data.profile.onboardingDone && <Onboarding />}
-      {legacyAvailable && !migrationSeen && <Modal title="Import this device’s training data?" onClose={finishLegacyReview}><p>FitCoach found data from before sign-in was added. Import it into this Google account to keep using your existing plans, profile, and workout history.</p><p className="field-hint">The original local data is kept. Importing replaces data in this account if it already has any.</p>{legacyImportError && <p className="auth-error" role="alert">Import failed: {legacyImportError}</p>}<div className="action-row"><button className="button secondary" disabled={importingLegacy} onClick={finishLegacyReview}>Keep accounts separate</button><button className="button primary" disabled={importingLegacy} onClick={() => void importLegacy()}>{importingLegacy ? 'Importing…' : 'Import data'}</button></div></Modal>}
-    </div>
+    <CoachProvider>
+      <div className="app-shell">
+        <header className="app-header"><Link to="/" className="brand" aria-label="FitCoach home"><span className="brand-mark">f.</span><span>fitcoach<span className="brand-dot">.</span></span></Link>
+          <div className="header-right"><Link className="local-badge" to="/settings" aria-label={`Synchronization: ${syncStatus?.message ?? syncLabel}`}><span />{auth.offlineAccess ? 'Offline · saved here' : syncLabel}</Link><Link className="icon-button" to="/settings" aria-label="Settings"><SettingsIcon size={20} /></Link><button className="icon-button" aria-label="Sign out" title={auth.email ? `Sign out ${auth.email}` : 'Sign out'} onClick={() => void auth.signOut()}><LogOut size={18} /></button></div></header>
+        {!online && <div className="connection-banner"><WifiOff size={15} /> Offline. Your training stays with you.</div>}
+        {syncStatus && (syncStatus.state === 'syncing' || syncStatus.state === 'error' || syncStatus.conflicts > 0 || syncStatus.pending > 0 || localPending > 0) && <Link to="/settings" className={`connection-banner sync-banner ${syncStatus.state === 'error' || syncStatus.conflicts ? 'sync-alert' : ''}`} role="status">{syncStatus.state === 'syncing' ? syncStatus.message : syncStatus.conflicts ? `${syncStatus.conflicts} sync conflict${syncStatus.conflicts === 1 ? '' : 's'} need your choice.` : syncStatus.failed ? `${syncStatus.failed} change${syncStatus.failed === 1 ? '' : 's'} failed to upload.` : syncStatus.state === 'error' ? syncStatus.message : `${Math.max(syncStatus.pending, localPending)} change${Math.max(syncStatus.pending, localPending) === 1 ? '' : 's'} waiting to sync.`} <span>View</span></Link>}
+        {auth.error && <div className="connection-banner" role="status">{auth.error}{online && <button onClick={() => void auth.signIn()}>Sign in again</button>}</div>}
+        {auth.offlineAccess && <div className="connection-banner">Offline access for this account. Workout logging stays local until you’re online and signed in.</div>}
+        {needRefresh && <div className="connection-banner">A new version is ready. {active ? 'Finish your workout to update.' : <button onClick={() => run(() => updateServiceWorker(true))}>Update app</button>}</div>}
+        <main id="main-content"><Routes>
+          <Route path="/auth/callback" element={<Navigate to="/" replace />} />
+          <Route path="/" element={<Today />} /><Route path="/plan" element={<Plans />} />
+          <Route path="/coach" element={<Coach />} /><Route path="/history" element={<Suspense fallback={<div className="page"><p className="field-hint">Opening your journal…</p></div>}><History /></Suspense>} />
+          <Route path="/workout/:id" element={<WorkoutPage />} /><Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<div className="empty"><h1>Page not found</h1><Link to="/" className="button primary">Back to Today</Link></div>} />
+        </Routes></main>
+        {active && !location.pathname.startsWith('/workout/') && <Link className="resume-bar" to={`/workout/${active.id}`}><span className="pulse" /><div><strong>Workout in progress</strong><small>{active.name}</small></div><span>Resume<ArrowUpRight size={18} /></span></Link>}
+        <nav className="bottom-nav" aria-label="Main navigation">
+          {[['/', 'Today', Activity], ['/plan', 'Plan', LayoutGrid], ['/coach', 'Coach', Sparkles], ['/history', 'History', HistoryIcon]].map(([to, label, Icon]) => {
+            const Component = Icon as typeof Dumbbell;
+            return <NavLink key={String(to)} to={String(to)} end={to === '/'} className={({ isActive }) => isActive ? 'active' : ''}><Component size={21} /><span>{String(label)}</span></NavLink>;
+          })}
+        </nav>
+        {toast && <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <AlertCircle size={18} aria-hidden="true" /> : <Check size={18} aria-hidden="true" />}<span>{toast.message}</span><button type="button" aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={16} aria-hidden="true" /></button></div>}
+        {!data.profile.onboardingDone && <Onboarding />}
+        {legacyAvailable && !migrationSeen && <Modal title="Import this device’s training data?" onClose={finishLegacyReview}><p>FitCoach found data from before sign-in was added. Import it into this Google account to keep using your existing plans, profile, and workout history.</p><p className="field-hint">The original local data is kept. Importing replaces data in this account if it already has any.</p>{legacyImportError && <p className="auth-error" role="alert">Import failed: {legacyImportError}</p>}<div className="action-row"><button className="button secondary" disabled={importingLegacy} onClick={finishLegacyReview}>Keep accounts separate</button><button className="button primary" disabled={importingLegacy} onClick={() => void importLegacy()}>{importingLegacy ? 'Importing…' : 'Import data'}</button></div></Modal>}
+      </div>
+    </CoachProvider>
   </AppContext.Provider>;
 }
 

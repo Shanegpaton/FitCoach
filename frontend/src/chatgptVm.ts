@@ -86,7 +86,7 @@ export function liveCoach(userId: string, syncReady: boolean): ChatAdapter {
     const trainingDataReady = syncReady && state?.bootstrapComplete === true && pending === 0 && conflicts === 0;
     const now = new Date();
     const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const reply = await backendChatGPTRequest<{ text: string; proposal?: import('./coach').ServerPlanProposal | null; messageId: string; userMessageId?: string; replayed?: boolean }>(userId, 'coach', {
+    const reply = await backendChatGPTRequest<{ text: string; proposal?: import('./coach').ServerProposal | null; messageId: string; userMessageId?: string; replayed?: boolean }>(userId, 'coach', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ conversationId, requestId, message: { role: 'user', text: messages.at(-1)?.text.slice(0, 5000) },
         localDate, trainingDataReady }),

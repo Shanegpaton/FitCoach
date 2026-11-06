@@ -73,12 +73,13 @@ async def test_plan_proposal_tool_returns_reviewable_payload_without_approval_to
 
 
 @pytest.mark.asyncio
-async def test_second_proposal_in_one_request_is_rejected():
+@pytest.mark.parametrize('tool_name', ['propose_training_plan', 'propose_plan_changes', 'propose_workout_changes'])
+async def test_second_proposal_in_one_request_is_rejected(tool_name):
     count = 0
     async def respond(_):
         nonlocal count
         count += 1
-        return {'output': [{'type': 'function_call', 'name': 'propose_training_plan', 'arguments': '{}', 'call_id': str(count)}], 'text': ''}
+        return {'output': [{'type': 'function_call', 'name': tool_name, 'arguments': '{}', 'call_id': str(count)}], 'text': ''}
     async def run_tool(*_): return '{"proposal":{"id":"persisted"}}'
     with pytest.raises(InferenceError, match='already created'):
         await build_coach_graph(respond, run_tool).ainvoke({'input': [{'role': 'user', 'content': 'Build me a plan'}]})
