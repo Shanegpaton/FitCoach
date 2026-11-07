@@ -13,6 +13,7 @@ import { errorMessage } from './errors';
 import { Today } from './pages/Today';
 import { Plans } from './pages/Plans';
 import { WorkoutPage } from './pages/Workout';
+import { CoachMaintenance } from './coachContext';
 import { Coach, CoachProvider } from './pages/Coach';
 import { Settings, Onboarding } from './pages/Settings';
 
@@ -58,7 +59,6 @@ export function App() {
     window.addEventListener('online', update); window.addEventListener('offline', update);
     return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
   }, []);
-  useEffect(() => { window.scrollTo(0, 0); }, [location.pathname]);
   useEffect(() => {
     if (!toast || toast.error) return;
     const timeout = setTimeout(() => setToast(null), 4000); return () => clearTimeout(timeout);
@@ -75,6 +75,10 @@ export function App() {
     if (!auth.userId || readyForUser !== auth.userId) return 0;
     return db.outbox.where('userId').equals(auth.userId).count();
   }, [auth.userId, readyForUser]) ?? 0;
+  useEffect(() => {
+    if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: 'start' });
+    else window.scrollTo(0, 0);
+  }, [location.pathname, location.hash, Boolean(data)]);
   const notify = (message: string, error = false) => setToast({ message, error });
   const run = async (action: () => Promise<unknown>, success?: string) => {
     try { await action(); if (success) notify(success); return true; }
@@ -108,7 +112,7 @@ export function App() {
     }
   };
   if (auth.loading) return <div className="startup"><span className="brand-mark">f.</span><p>Checking your training space…</p></div>;
-  if (!auth.userId) return <div className="auth-screen"><span className="brand-mark large">f.</span><span className="eyebrow">FITCOACH</span><h1>Your training,<br /><span className="text-accent">on your terms.</span></h1><p>Sign in with Google to open your private training space. Once signed in on this device, your workouts stay available offline.</p>{!auth.configured && <div className="auth-config" role="status"><strong>Supabase setup needed</strong><span>Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in frontend/.env.local, then configure Google OAuth in Supabase.</span></div>}<button className="button primary google-signin" disabled={!auth.configured || !online} onClick={() => void auth.signIn()}><GoogleMark />Continue with Google</button>{!online && <p className="field-hint">Connect to the internet to sign in for the first time.</p>}{auth.error && <p className="auth-error" role="alert">{auth.error}</p>}</div>;
+  if (!auth.userId) return <div className="auth-screen"><span className="brand-mark large">f.</span><h1>Sign in to FitCoach</h1><p>Sign in with Google to open your private training space. Once signed in on this device, your workouts stay available offline.</p>{!auth.configured && <div className="auth-config" role="status"><strong>Supabase setup needed</strong><span>Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in frontend/.env.local, then configure Google OAuth in Supabase.</span></div>}<button className="button primary google-signin" disabled={!auth.configured || !online} onClick={() => void auth.signIn()}><GoogleMark />Continue with Google</button>{!online && <p className="field-hint">Connect to the internet to sign in for the first time.</p>}{auth.error && <p className="auth-error" role="alert">{auth.error}</p>}</div>;
   if (fatal) return <div className="startup"><h1>Storage is unavailable</h1><p>FitCoach needs browser storage to save workouts. Check storage permissions and available space, then retry.</p><details><summary>Details</summary>{fatal}</details><button className="button primary" onClick={() => window.location.reload()}>Retry</button></div>;
   if (!data) return <div className="startup"><span className="brand-mark">f.</span><p>Getting your training space ready…</p></div>;
   const active = data.sessions.filter(s => s.status === 'active').sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
@@ -120,16 +124,18 @@ export function App() {
   const trainingDataReady = Boolean(syncStatus?.state === 'idle' && syncStatus.lastSuccessAt
     && !syncStatus.pending && !syncStatus.failed && !syncStatus.conflicts && !localPending);
   return <AppContext.Provider value={{ ...data, trainingDataReady, notify, run }}>
-    <CoachProvider>
+    <CoachProvider key={auth.userId}>
       <div className="app-shell">
+        <a className="skip-link" href="#main-content">Skip to content</a>
+        <CoachMaintenance />
         <header className="app-header"><Link to="/" className="brand" aria-label="FitCoach home"><span className="brand-mark">f.</span><span>fitcoach<span className="brand-dot">.</span></span></Link>
-          <div className="header-right"><Link className="local-badge" to="/settings" aria-label={`Synchronization: ${syncStatus?.message ?? syncLabel}`}><span />{auth.offlineAccess ? 'Offline · saved here' : syncLabel}</Link><Link className="icon-button" to="/settings" aria-label="Settings"><SettingsIcon size={20} /></Link><button className="icon-button" aria-label="Sign out" title={auth.email ? `Sign out ${auth.email}` : 'Sign out'} onClick={() => void auth.signOut()}><LogOut size={18} /></button></div></header>
+          <div className="header-right"><Link className="local-badge" to="/settings" aria-label={`Synchronization: ${syncLabel}`}><span />{auth.offlineAccess ? 'Offline · saved here' : syncLabel}</Link><Link className="icon-button" to="/settings" aria-label="Settings"><SettingsIcon size={20} /></Link><button className="icon-button" aria-label="Sign out" title={auth.email ? `Sign out ${auth.email}` : 'Sign out'} onClick={() => void auth.signOut()}><LogOut size={18} /></button></div></header>
         {!online && <div className="connection-banner"><WifiOff size={15} /> Offline. Your training stays with you.</div>}
-        {syncStatus && (syncStatus.state === 'syncing' || syncStatus.state === 'error' || syncStatus.conflicts > 0 || syncStatus.pending > 0 || localPending > 0) && <Link to="/settings" className={`connection-banner sync-banner ${syncStatus.state === 'error' || syncStatus.conflicts ? 'sync-alert' : ''}`} role="status">{syncStatus.state === 'syncing' ? syncStatus.message : syncStatus.conflicts ? `${syncStatus.conflicts} sync conflict${syncStatus.conflicts === 1 ? '' : 's'} need your choice.` : syncStatus.failed ? `${syncStatus.failed} change${syncStatus.failed === 1 ? '' : 's'} failed to upload.` : syncStatus.state === 'error' ? syncStatus.message : `${Math.max(syncStatus.pending, localPending)} change${Math.max(syncStatus.pending, localPending) === 1 ? '' : 's'} waiting to sync.`} <span>View</span></Link>}
+        {syncStatus && (syncStatus.state === 'syncing' || syncStatus.state === 'error' || syncStatus.conflicts > 0 || syncStatus.pending > 0 || localPending > 0) && <Link to="/settings" className={`connection-banner sync-banner ${syncStatus.state === 'error' || syncStatus.conflicts ? 'sync-alert' : ''}`} role="status">{syncStatus.state === 'syncing' ? 'Saved on this device. Syncing…' : syncStatus.conflicts ? `${syncStatus.conflicts} sync conflict${syncStatus.conflicts === 1 ? '' : 's'} need your choice.` : syncStatus.failed ? `${syncStatus.failed} change${syncStatus.failed === 1 ? '' : 's'} failed to upload.` : syncStatus.state === 'error' ? 'Saved on this device. Sync needs attention.' : `${Math.max(syncStatus.pending, localPending)} change${Math.max(syncStatus.pending, localPending) === 1 ? '' : 's'} waiting to sync.`} <span>View</span></Link>}
         {auth.error && <div className="connection-banner" role="status">{auth.error}{online && <button onClick={() => void auth.signIn()}>Sign in again</button>}</div>}
         {auth.offlineAccess && <div className="connection-banner">Offline access for this account. Workout logging stays local until you’re online and signed in.</div>}
         {needRefresh && <div className="connection-banner">A new version is ready. {active ? 'Finish your workout to update.' : <button onClick={() => run(() => updateServiceWorker(true))}>Update app</button>}</div>}
-        <main id="main-content"><Routes>
+        <main id="main-content" tabIndex={-1}><Routes>
           <Route path="/auth/callback" element={<Navigate to="/" replace />} />
           <Route path="/" element={<Today />} /><Route path="/plan" element={<Plans />} />
           <Route path="/coach" element={<Coach />} /><Route path="/history" element={<Suspense fallback={<div className="page"><p className="field-hint">Opening your journal…</p></div>}><History /></Suspense>} />

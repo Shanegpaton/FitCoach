@@ -175,6 +175,19 @@ async def delete_conversation(database, user_id: UUID, conversation_id: UUID):
                 {'user': user_id, 'id': conversation_id})
             if active:
                 raise HTTPException(409, 'Wait for the current Coach message to finish before deleting this conversation.')
+            # Remove source links before the FK cascade; preserve facts supported by other
+            # conversations and facts the user explicitly edited.
+            memories = (await session.execute(sa.text('SELECT * FROM fitcoach.coach_memories WHERE user_id=:user'), {'user': user_id})).mappings().all()
+            for memory in memories:
+                refs = [ref for ref in memory['source_messages'] if ref['conversationId'] != str(conversation_id)]
+                if len(refs) == len(memory['source_messages']):
+                    continue
+                if not refs and not memory['edited']:
+                    await session.execute(sa.text('DELETE FROM fitcoach.coach_memories WHERE id=:id'), {'id': memory['id']})
+                else:
+                    await session.execute(sa.text('UPDATE fitcoach.coach_memories SET source_messages=CAST(:refs AS jsonb),source_conversation=:source,version=version+1 WHERE id=:id'),
+                        {'refs': json.dumps(refs), 'source': UUID(refs[0]['conversationId']) if refs and not memory['edited'] else None, 'id': memory['id']})
+            await session.execute(sa.text('UPDATE fitcoach.coach_memory_settings SET version=version+1,generation=generation+1 WHERE user_id=:user'), {'user': user_id})
             row = (await session.execute(sa.text('''DELETE FROM fitcoach.coach_conversations
                 WHERE user_id=:user AND conversation_id=:id RETURNING thread_id'''),
                 {'user': user_id, 'id': conversation_id})).first()
@@ -276,6 +289,16 @@ async def finish_turn(database, user_id: UUID, conversation_id: UUID, request_id
                  'user': user_id, 'conversation': conversation_id, 'request': request_id})
             await session.execute(sa.text('''UPDATE fitcoach.coach_conversations SET updated_at=now()
                 WHERE user_id=:user AND conversation_id=:conversation'''), {'user': user_id, 'conversation': conversation_id})
+            # Schedule extraction in the same transaction as the completed reply.
+            # Standalone test/sample callers without context state do not opt into backfill.
+            try:
+                from .agent.context_store import memory_enabled, queue
+            except ImportError:
+                from agent.context_store import memory_enabled, queue
+            if memory_enabled():
+                automatic = await session.scalar(sa.text('SELECT automatic FROM fitcoach.coach_memory_settings WHERE user_id=:user'), {'user': user_id})
+                if automatic:
+                    await queue(session, user_id, conversation_id, 'memory', seq)
     return str(assistant_id)
 
 

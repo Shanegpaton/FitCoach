@@ -3,8 +3,18 @@ import { X } from 'lucide-react';
 import type RFB from '@novnc/novnc';
 import { chatgptVmUrl } from '../chatgptVm';
 import { typeRemoteText } from '../remoteKeyboard';
+import { createPortal } from 'react-dom';
 
 export function ChatGPTViewer({ token, onClose }: { token: string; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const close = useRef(onClose); close.current = onClose;
+  useEffect(() => {
+    const element = dialog.current!;
+    element.showModal();
+    const cancel = (event: Event) => { event.preventDefault(); close.current(); };
+    element.addEventListener('cancel', cancel);
+    return () => { element.removeEventListener('cancel', cancel); element.close(); };
+  }, []);
   const target = useRef<HTMLDivElement>(null);
   const remote = useRef<RFB | null>(null);
   const [status, setStatus] = useState('Opening the OpenAI sign-in page…');
@@ -54,7 +64,7 @@ export function ChatGPTViewer({ token, onClose }: { token: string; onClose: () =
     return () => { disposed = true; remote.current = null; disconnect?.(); };
   }, [token]);
 
-  return <div className="chatgpt-viewer" role="dialog" aria-modal="true" aria-label="ChatGPT sign-in">
+  return createPortal(<dialog ref={dialog} className="chatgpt-viewer" aria-label="ChatGPT sign-in">
     <div className="chatgpt-viewer-header"><div><strong>Connect ChatGPT</strong><span>Sign in and review permission on OpenAI’s page.</span></div><button className="icon-button" aria-label="Close ChatGPT sign-in" onClick={onClose}><X size={20} /></button></div>
     <p className="chatgpt-viewer-status" role="status">{status}</p>
     <div className="chatgpt-viewer-screen" ref={target} aria-label="Interactive OpenAI sign-in browser" />
@@ -67,5 +77,5 @@ export function ChatGPTViewer({ token, onClose }: { token: string; onClose: () =
         <button type="button" className="button secondary" disabled={!ready} onClick={() => sendControl(0xff09)}>Tab</button>
         <button type="button" className="button secondary" disabled={!ready} onClick={() => sendControl(0xff0d)}>Enter</button></div>
     </div>
-  </div>;
+  </dialog>, document.body);
 }

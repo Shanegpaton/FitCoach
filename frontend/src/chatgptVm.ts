@@ -38,7 +38,7 @@ export async function backendRequest<T>(userId: string, path: string, init: Requ
   const abort = () => controller.abort();
   init.signal?.addEventListener('abort', abort, { once: true });
   if (init.signal?.aborted) abort();
-  const timeout = setTimeout(abort, path === 'chatgpt/coach' ? 250_000 : 20_000);
+  const timeout = setTimeout(abort, path === 'chatgpt/coach' ? 250_000 : path === 'coach/maintenance' ? 75_000 : 20_000);
   try {
     return await new Promise<T>((resolve, reject) => {
       const interrupted = () => reject(new Error('Request aborted'));
@@ -91,6 +91,7 @@ export function liveCoach(userId: string, syncReady: boolean): ChatAdapter {
       body: JSON.stringify({ conversationId, requestId, message: { role: 'user', text: messages.at(-1)?.text.slice(0, 5000) },
         localDate, trainingDataReady }),
     });
+    window.dispatchEvent(new CustomEvent('fitcoach:coach-maintenance', { detail: { conversationId } }));
     return { text: reply.text, serverProposal: reply.proposal ?? null, persistedMessageId: reply.messageId,
       persistedUserMessageId: reply.userMessageId, replayed: reply.replayed };
   } };

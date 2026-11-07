@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
+import { CoachContextStatus } from '../coachContext';
 import Markdown from 'react-markdown';
+import { Link } from 'react-router';
 import remarkGfm from 'remark-gfm';
 import { ArrowRight, Check, MessageCircle, Plus, Send, Sparkles, X, Pencil, Trash2 } from 'lucide-react';
 import { db, applyProposal, cacheApprovedProposal, enqueueChange, putLocalChange, syncRootId } from '../db';
@@ -497,24 +499,24 @@ export function Coach() {
   }, [initCoach]);
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    bottom.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'end' });
   }, [messages.length, sending]);
 
   return (
     <div className="page coach-page">
       <div className="coach-top">
         <div>
-          <span className="eyebrow">A LITTLE DIRECTION</span>
-          <h1>Your corner.</h1>
+          <h1>Coach</h1>
         </div>
-        <button
+        {mode === 'sample' ? <Link to="/settings#coach-connection" className="button secondary">Connect ChatGPT</Link> : <button
           className="button secondary"
           aria-label="New conversation"
+          title={mode !== 'chatgpt' ? 'Connect ChatGPT in Settings to create conversations' : 'Start a new conversation'}
           disabled={sending || mode !== 'chatgpt' || !userId || !navigator.onLine}
           onClick={() => void createConversation()}
         >
           <Plus size={18} />New chat
-        </button>
+        </button>}
       </div>
 
       {mode === 'chatgpt' && conversations.length > 0 && (
@@ -564,12 +566,11 @@ export function Coach() {
               : 'Sample responses are available offline or without ChatGPT plan permission.'}
         </p>
       </div>
+    {mode === 'chatgpt' && <CoachContextStatus key={`${userId}:${activeConversationId}`} conversationId={activeConversationId} sending={sending} />}
 
       {messages.length === 0 && (
         <div className="coach-welcome">
-          <div className="orb"><Sparkles size={34} strokeWidth={1.5} /></div>
-          <h2>Training with<br />a little more intention.</h2>
-          <p>Build a routine. Understand the details.<br />Make the plan your own.</p>
+          <h2>What would help today?</h2>
           <div className="conversation-starters">
             {(mode === 'chatgpt'
               ? [['How should I start training?', 'Get practical first steps'], ['Explain my plan', 'Understand your routine'], ['How should I recover?', 'Talk through rest and recovery']]
@@ -593,7 +594,7 @@ export function Coach() {
               {message.role === 'assistant' && <span className="message-avatar"><Sparkles size={17} /></span>}
               <div className="message-content">
                 {message.role === 'assistant' && (
-                  <span className="eyebrow">COACH · {message.source === 'chatgpt' ? 'CHATGPT' : 'SAMPLE RESPONSE'}</span>
+                  <span className="eyebrow">Coach · {message.source === 'chatgpt' ? 'ChatGPT' : 'Sample response'}</span>
                 )}
                 <div className="message-markdown">
                   <Markdown remarkPlugins={[remarkGfm]}>{message.text}</Markdown>
@@ -725,7 +726,7 @@ export function Coach() {
           value={text}
           maxLength={5000}
           onChange={e => setText(e.target.value)}
-          placeholder="Let’s talk about your training…"
+          placeholder="Ask about your training"
           rows={1}
           onKeyDown={e => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {

@@ -7,6 +7,7 @@ import { db, exportBackup, importBackup, putLocalChange } from '../db';
 import { useApp } from '../state';
 import { Days, Modal, SectionTitle } from '../ui';
 import { ConflictReview } from './ConflictReview';
+import { CoachMemorySettings } from '../coachContext';
 import { ChatGPTConnection } from './ChatGPTConnection';
 
 function TrainingFields({ value, onChange }: { value: Profile; onChange: (profile: Profile) => void }) {
@@ -21,7 +22,7 @@ export function Onboarding() {
   const { profile, run } = useApp(); const [step, setStep] = useState(0); const [draft, setDraft] = useState(profile);
   const save = () => run(() => putLocalChange('profile', { ...draft, onboardingDone: true }, db.profile));
   return <Modal title="Welcome to your training space" onClose={() => run(() => putLocalChange('profile', { ...profile, onboardingDone: true }, db.profile)).then(() => undefined)}><div className="onboarding-progress"><span className={step === 0 ? 'selected' : ''} /><span className={step === 1 ? 'selected' : ''} /></div>
-    {step === 0 ? <div className="onboarding-intro"><span className="brand-mark large">f.</span><h2>A plan that fits.<br /><span className="text-accent">Progress that lasts.</span></h2><p>Make a little space for your goals. We’ll keep your workouts and history right here, on your device.</p><button className="button primary" onClick={() => setStep(1)}>Set up my profile<ArrowRight size={18} /></button></div> : <form onSubmit={e => { e.preventDefault(); void save(); }}><TrainingFields value={draft} onChange={setDraft} /><button className="button primary" type="submit">Let’s get started<ArrowRight size={18} /></button></form>}
+    {step === 0 ? <div className="onboarding-intro"><span className="brand-mark large">f.</span><h2>Set up your training profile</h2><p>Choose your equipment, training days, and weight unit. You can start logging offline after setup.</p><button className="button primary" onClick={() => setStep(1)}>Set up my profile<ArrowRight size={18} /></button></div> : <form onSubmit={e => { e.preventDefault(); void save(); }}><TrainingFields value={draft} onChange={setDraft} /><button className="button primary" type="submit">Let’s get started<ArrowRight size={18} /></button></form>}
     <button className="text-button onboarding-skip" onClick={() => run(() => putLocalChange('profile', { ...profile, onboardingDone: true }, db.profile))}>Skip for now</button><p className="field-hint centered">You can change these details anytime in Settings.</p>
   </Modal>;
 }
@@ -54,9 +55,10 @@ export function Settings() {
       a.href = url; a.download = `fitcoach-backup-${backup.exportedAt.slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     }, 'Backup exported');
   };
-  return <div className="page settings-page"><Link to="/" className="text-button"><ArrowLeft size={17} />Back to Today</Link><div className="page-heading compact-heading"><span className="eyebrow">MAKE IT YOURS</span><h1>Your space.</h1><p>A few details. A better starting point.</p></div>
-    <form className="settings-card" onSubmit={save}><SectionTitle title="Training profile" /><TrainingFields value={draft} onChange={setDraft} /><button className="button primary" type="submit">Save profile<Check size={18} /></button></form>
-    <section className="settings-card"><SectionTitle title="Synchronization"><HardDrive size={20} /></SectionTitle><div className="privacy-note"><ShieldCheck size={20} /><p>Every change saves on this device first. When you’re online and signed in, your plans and workouts sync to your account. Export a backup before changing phones or clearing browser data.</p></div>
+  return <div className="page settings-page"><Link to="/" className="text-button"><ArrowLeft size={17} />Back to Today</Link><div className="page-heading compact-heading"><h1>Settings</h1><p>Profile, connections, and saved data.</p></div>
+    <nav className="settings-links" aria-label="Settings sections"><a href="#training-profile">Training profile</a><a href="#sync-settings">Sync & backups</a><a href="#coach-connection">ChatGPT</a><a href="#coach-memory">Coach memory</a><a href="#install-app">Install app</a></nav>
+    <form id="training-profile" className="settings-card" onSubmit={save}><SectionTitle title="Training profile" /><TrainingFields value={draft} onChange={setDraft} /><button className="button primary" type="submit">Save profile<Check size={18} /></button></form>
+    <section id="sync-settings" className="settings-card"><SectionTitle title="Synchronization"><HardDrive size={20} /></SectionTitle><div className="privacy-note"><ShieldCheck size={20} /><p>Every change saves on this device first. When you’re online and signed in, your plans and workouts sync to your account. Export a backup before changing phones or clearing browser data.</p></div>
       <p role="status">{failed.length ? `${failed.length} change${failed.length === 1 ? '' : 's'} failed to upload.` : conflicts.length ? `${conflicts.length} conflict${conflicts.length === 1 ? '' : 's'} need your choice.` : pendingSync.length ? `${pendingSync.length} change${pendingSync.length === 1 ? '' : 's'} pending upload.` : 'All changes are synchronized.'}</p>
       <p className="field-hint">{syncState?.updatedAt ? `Last sync activity: ${new Date(syncState.updatedAt).toLocaleString()}` : 'This account has not synchronized on this device yet.'}</p>
       <button className="button secondary" onClick={() => window.dispatchEvent(new Event('fitcoach:sync-now'))}><RefreshCw size={16} />Sync now</button>
@@ -83,8 +85,9 @@ export function Settings() {
       const persistent = await navigator.storage?.persist?.(); notify(persistent ? 'Persistent storage enabled.' : 'Your browser manages storage. Keep regular exported backups.');
     })}>Request persistent storage</button></section>
     <ChatGPTConnection />
-    <section className="settings-card"><SectionTitle title="Take it to the gym"><Smartphone size={20} /></SectionTitle><p>Install FitCoach on your home screen after opening it once online. Your plans, logs, timers, and history work offline.</p><div className="install-steps"><div><span>01</span><p><strong>iPhone / iPad</strong>Open in Safari, tap Share, then Add to Home Screen.</p></div><div><span>02</span><p><strong>Android</strong>Open in Chrome, then choose Install app or Add to Home screen in the browser menu.</p></div></div><p className="field-hint">Installation requires HTTPS on phones. ChatGPT Coach requires an online connection and granted plan usage.</p></section>
-    <p className="settings-footnote">FITCOACH · YOUR TRAINING, IN MOTION</p>
+    <CoachMemorySettings />
+    <section id="install-app" className="settings-card"><SectionTitle title="Install FitCoach"><Smartphone size={20} /></SectionTitle><p>Install FitCoach on your home screen after opening it once online. Your plans, logs, timers, and history work offline.</p><div className="install-steps"><div><p><strong>iPhone / iPad</strong>Open in Safari, tap Share, then Add to Home Screen.</p></div><div><p><strong>Android</strong>Open in Chrome, then choose Install app or Add to Home screen in the browser menu.</p></div></div><p className="field-hint">Installation requires HTTPS on phones. ChatGPT Coach requires an online connection and granted plan usage.</p></section>
+
     {backup && <Modal title="Replace local data?" onClose={() => setBackup(null)}><p>This backup contains {backup.plans.length} plans and {backup.sessions.length} sessions. Importing replaces the data currently stored on this device, including {sessions.length} sessions.</p><p className="field-hint">Export your current data first if you want to keep it.</p><div className="action-row"><button className="button secondary" onClick={exportFile}>Export current data</button><button className="button primary" disabled={busy} onClick={async () => {
       setBusy(true); if (await run(() => importBackup(backup), 'Backup imported')) { setDraft(backup.profile); setBackup(null); } setBusy(false);
     }}>{busy ? 'Importing…' : 'Replace & import'}</button></div></Modal>}

@@ -11,6 +11,21 @@ const label = (key: string) => key.replace(/([A-Z])/g, ' $1').replace(/^./, firs
 const preview = (value: unknown) => Array.isArray(value) ? `${value.length} item${value.length === 1 ? '' : 's'}`
   : typeof value === 'object' && value !== null ? 'Details' : String(value ?? '—');
 
+function VersionPreview({ value, deleted }: { value: Record<string, unknown> | null; deleted: string }) {
+  if (!value) return <p>{deleted}</p>;
+  const blocks = Array.isArray(value.blocks) ? value.blocks as Session['blocks'] : [];
+  const workouts = Array.isArray(value.workouts) ? value.workouts as Plan['workouts'] : [];
+  return <>
+    <strong>{String(value.name ?? value.goals ?? 'Training profile')}</strong>
+    {value.date && <p>{String(value.date)}</p>}
+    {value.status && <p>Status: {String(value.status)}</p>}
+    {workouts.map(workout => <p key={workout.id}>{workout.name}: {workout.blocks.length} exercises</p>)}
+    {blocks.map(block => <p key={block.id}>{block.name}: {block.sets.filter(set => set.done).length} of {block.sets.length} sets logged</p>)}
+    {value.notes && <p>{String(value.notes)}</p>}
+    <details><summary>View full record</summary><pre>{JSON.stringify(value, null, 2)}</pre></details>
+  </>;
+}
+
 export function ConflictReview({ conflict, onClose, onResolved }: {
   conflict: SyncRecord; onClose: () => void; onResolved: (message: string) => void;
 }) {
@@ -63,12 +78,12 @@ export function ConflictReview({ conflict, onClose, onResolved }: {
     } catch { setError('Fix the full record JSON before changing another field.'); }
   };
   return <Modal title="Resolve sync conflict" onClose={() => { if (!busy) onClose(); }} wide>
-    <p className="field-hint">{conflict.entity} · {conflict.entityId}</p>
+    <p className="field-hint">{String(local?.name ?? cloud?.name ?? 'Training record')}</p>
     <p>Review both versions before choosing. The version you replace is kept as a recovery copy.</p>
     {!snapshot ? <p role="status">Loading both versions…</p> : <>
       <div className="conflict-versions">
-        <details><summary>This device</summary><pre>{local ? JSON.stringify(local, null, 2) : 'Deleted on this device'}</pre></details>
-        <details><summary>Cloud</summary><pre>{cloud ? JSON.stringify(cloud, null, 2) : 'Deleted in the cloud'}</pre></details>
+        <section className="conflict-version"><h3>This device</h3><VersionPreview value={local} deleted="Deleted on this device" /></section>
+        <section className="conflict-version"><h3>Cloud</h3><VersionPreview value={cloud} deleted="Deleted in the cloud" /></section>
       </div>
       {snapshot.remoteDeleted && <p className="field-hint">The cloud record was deleted. Its ID cannot be reused. Use cloud keeps your device’s version in recovery.</p>}
       {error && <p className="auth-error" role="alert">{error}</p>}

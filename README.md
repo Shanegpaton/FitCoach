@@ -6,7 +6,17 @@ Settings contains the [ChatGPT VM connection](services/chatgpt_vm/README.md). Th
 
 FitCoachGPT is a phone-first workout planner and tracker. Build a routine, log your sets, and see your progress in a dark, installable Progressive Web App (PWA).
 
-The app stores plans, goals, workout history, and conversations on your device. Google sign-in uses Supabase Auth; each account has a separate local workout database. After an account signs in on a device, the workout tracker remains available offline.
+The app stores plans, goals, workout history, and sample conversations on your device. Live Coach conversations are stored in your account. Google sign-in uses Supabase Auth; each account has a separate local workout database. After an account signs in on a device, the workout tracker remains available offline.
+
+## Coach context and memory
+
+Live Coach discovers the selected model's context-window limit from account model metadata, then checks an exact-ID registry verified against official model documentation. Unknown limits fall back to 32,000 tokens (`FITCOACH_CONTEXT_FALLBACK_TOKENS`). The model stays fixed throughout a turn. Input accounting includes instructions, tool schemas, chat, summaries, memories, and tool/reasoning items, with reserved output and safety capacity. Recognized models use `tiktoken`; unavailable tokenizers use conservative UTF-8 byte estimates.
+
+At approximately 70% of the usable input budget, FitCoach queues a summary of older completed exchanges. There is no message-count trigger. Summaries are prepared through separate bounded requests while the app is open, across all screens. If context fills before preprocessing finishes, Coach can wait for compaction before answering. Original conversation messages remain saved; the Coach offers a view of its earlier-chat summary. A changed model gets a fresh budget, including compaction when switching to a smaller window.
+
+Coach also automatically remembers durable preferences, equipment/access constraints, and self-reported injuries or limitations across conversations. These are account-scoped derived facts, not diagnoses or a substitute for fresh training records. Settings → Coach memory lets you review, edit, forget individual/all memories, or stop automatic saving. Disabling saving retains existing memories. Memory starts with new messages after rollout rather than mining old chats. Deleting a conversation removes automatically extracted facts supported solely by it; facts you edited remain until you forget them. Memories and summaries are separate from workout synchronization and exported workout backups.
+
+Maintenance uses leased PostgreSQL jobs. Closing the app may interrupt processing; the next online foreground visit resumes it. Summarization and memory extraction use additional connected ChatGPT usage. Set `FITCOACH_CONTEXT_ENABLED=false` to fall back to bounded recent chat, or `FITCOACH_MEMORY_ENABLED=false` to stop automatic extraction. Deploy migration **0010** before the new API code; migrations require migration credentials, not the API runtime role. Token estimates and timing are logged without chat or memory text.
 
 ## Run the PWA
 
@@ -44,6 +54,8 @@ Set `VITE_FITCOACH_API_URL` in `frontend/.env.development.local` to the local tr
 Open `http://localhost:4173` once online, then test offline. Service-worker caching is enabled in the production build, not the development server. Keep using the same origin: development, preview, and different hostnames have separate browser databases.
 
 ### What you can do
+
+The phone UI puts Start/Resume ahead of the calendar on Today and recent sessions ahead of trends in History. Workout rows emphasize actual weight, reps, and completion; **Effort & set options** reveals optional RPE and set removal. The plan editor keeps Save accessible while scrolling and asks before discarding unsaved edits. Settings includes direct links to profile, synchronization/backups, ChatGPT, memory, and installation.
 
 - Skip or complete a brief training profile, then edit it in Settings.
 - Create, duplicate, reorder, and edit routines with weekday or rotating schedules.

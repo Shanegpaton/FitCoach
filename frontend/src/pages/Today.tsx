@@ -57,9 +57,9 @@ export function Today() {
 
   const isToday = date === localDate();
   const formattedDate = isToday
-    ? 'TODAY'
-    : atNoon(date).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }).toUpperCase();
-  const eyebrow = plan?.schedule === 'rotation' && isToday ? 'UP NEXT IN YOUR ROTATION' : formattedDate;
+    ? 'Today'
+    : atNoon(date).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  const eyebrow = plan?.schedule === 'rotation' && isToday ? 'Next in your rotation' : formattedDate;
   const title = sessionInProgress
     ? 'Pick up where you left off'
     : completedOnDate
@@ -72,42 +72,11 @@ export function Today() {
 
   return (
     <div className="page today-page">
-      <div className="page-heading">
-        <span className="eyebrow">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
-        <h1>Make room<br />for <span className="text-accent">stronger.</span></h1>
-        <p>Your next set starts here.</p>
+      <div className="page-heading today-heading">
+        <h1>Today</h1>
+        <p>{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
       </div>
 
-      <div className="week-heading">
-        <span>{atNoon(date).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</span>
-        <div>
-          <button className="icon-button" onClick={() => shift(-7)} aria-label="Previous week"><ChevronLeft size={18} /></button>
-          <button className="text-button" onClick={() => setDate(localDate())}>Today</button>
-          <button className="icon-button" onClick={() => shift(7)} aria-label="Next week"><ChevronRight size={18} /></button>
-        </div>
-      </div>
-
-      <div className="week-strip">
-        {dates.map(d => {
-          const iso = localDate(d);
-          const scheduled = getScheduled(iso);
-          const logged = completed.some(s => s.date === iso);
-          const hasActive = activeSessions.some(s => s.date === iso);
-          return (
-            <button
-              key={iso}
-              className={`${iso === date ? 'selected' : ''} ${iso === localDate() ? 'is-today' : ''}`}
-              aria-label={d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
-              aria-pressed={iso === date}
-              onClick={() => setDate(iso)}
-            >
-              <span>{weekdayNames[d.getDay()]}</span>
-              <strong>{d.getDate()}</strong>
-              <i className={logged ? 'logged' : scheduled || hasActive ? 'planned' : ''} />
-            </button>
-          );
-        })}
-      </div>
 
       {active && !sessionInProgress && (
         <div className="active-callout-banner">
@@ -132,7 +101,7 @@ export function Today() {
           </Link>
           {activeSessions.length > 1 && (
             <div className="other-active">
-              <span className="eyebrow">OTHER WORKOUTS IN PROGRESS</span>
+              <span className="eyebrow">Other workouts in progress</span>
               {activeSessions.filter(item => item.id !== sessionInProgress.id).map(item => (
                 <Link key={item.id} to={`/workout/${item.id}`}>
                   {item.name} · {item.blocks.flatMap(b => b.sets).filter(s => s.done).length} sets logged<ArrowUpRight size={16} />
@@ -145,7 +114,7 @@ export function Today() {
         <div className="workout-hero">
           <div className="hero-top">
             <span className="pill accent"><Check size={13} />Completed</span>
-            <span className="hero-number"><Check size={40} /></span>
+
           </div>
           <h2>{completedOnDate.name}</h2>
           <div className="hero-meta">
@@ -170,7 +139,7 @@ export function Today() {
         <div className="workout-hero">
           <div className="hero-top">
             <span className="pill"><Dumbbell size={14} />{plan!.name}</span>
-            <span className="hero-number">{String(plan!.workouts.indexOf(currentWorkout) + 1).padStart(2, '0')}</span>
+
           </div>
           <h2>{currentWorkout.name}</h2>
           <div className="hero-meta">
@@ -206,17 +175,51 @@ export function Today() {
         </div>
       ) : (
         <Empty
-          title="Your plan starts with you."
-          text="Build your own routine or explore a sample plan with Coach. Your workouts and progress will live right here."
+          title="Create your first plan"
+          text="Choose your exercises or start with an editable sample. Your plan and workout log stay available offline."
           action="Create a plan"
           to="/plan"
         />
       )}
 
+      <section className="calendar-section" aria-label="Workout calendar">
+      <div className="week-heading">
+        <span>{atNoon(date).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</span>
+        <div>
+          <button className="icon-button" onClick={() => shift(-7)} aria-label="Previous week"><ChevronLeft size={18} /></button>
+          <button className="text-button" onClick={() => setDate(localDate())}>Today</button>
+          <button className="icon-button" onClick={() => shift(7)} aria-label="Next week"><ChevronRight size={18} /></button>
+        </div>
+      </div>
+
+      <div className="week-strip">
+        {dates.map(d => {
+          const iso = localDate(d);
+          const scheduled = getScheduled(iso);
+          const logged = completed.some(s => s.date === iso);
+          const hasActive = activeSessions.some(s => s.date === iso);
+          return (
+            <button
+              key={iso}
+              className={`${iso === date ? 'selected' : ''} ${iso === localDate() ? 'is-today' : ''}`}
+              aria-label={d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
+              aria-pressed={iso === date}
+              onClick={() => setDate(iso)}
+            >
+              <span>{weekdayNames[d.getDay()]}</span>
+              <strong>{d.getDate()}</strong>
+              <i className={logged ? 'logged' : scheduled || hasActive ? 'planned' : ''} />
+            </button>
+          );
+        })}
+      </div>
+
+      </section>
+
       <div className="stats-grid">
-        <div><span>THIS WEEK</span><strong>{week.workouts}<small> workouts</small></strong></div>
-        <div><span>WORKING SETS</span><strong>{week.sets}<small> this week</small></strong></div>
-        <div><span>ALL TIME</span><strong>{completed.length}<small> workouts</small></strong></div>
+        <div><span>This week</span><strong>{week.workouts}<small> workouts</small></strong></div>
+        <div><span>Working sets</span><strong>{week.sets}<small> this week</small></strong></div>
+        <div><span>All time</span><strong>{completed.length}<small> workouts</small></strong></div>
       </div>
 
       {plan && (
@@ -241,13 +244,13 @@ export function Today() {
 
       <Link to="/coach" className="coach-callout">
         <span className="coach-symbol"><Sparkles size={23} /></span>
-        <div><strong>A plan you understand.</strong><p>Explore your routine with Coach.</p></div>
+        <div><strong>Talk through your training</strong><p>Explore your routine with Coach.</p></div>
         <MoveRight size={20} />
       </Link>
 
       {completed.length > 0 && (
         <>
-          <SectionTitle title="Last time you showed up" />
+          <SectionTitle title="Last completed workout" />
           <Link
             className="recent-card"
             to={`/workout/${completed.sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))[0].id}`}

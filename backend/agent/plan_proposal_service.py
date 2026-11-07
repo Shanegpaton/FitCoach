@@ -183,6 +183,10 @@ async def reject_proposal(database, user_id: UUID, proposal_id: UUID) -> dict:
                 WHERE user_id=:user_id AND proposal_id=:id AND status='pending' AND expires_at > now()'''),
                 {'user_id': user_id, 'id': proposal_id})
             if not result.rowcount:
+                owned = await session.scalar(sa.text('SELECT 1 FROM fitcoach.coach_proposals WHERE user_id=:user_id AND proposal_id=:id'),
+                    {'user_id': user_id, 'id': proposal_id})
+                if not owned:
+                    raise HTTPException(404, 'Proposal not found')
                 raise HTTPException(409, 'Proposal is no longer pending or has expired')
     return await read_proposal(database, user_id, proposal_id)
 

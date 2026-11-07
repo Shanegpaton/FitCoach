@@ -15,9 +15,9 @@ export function Plans() {
     copy.workouts.forEach(w => { w.id = uid(); w.blocks.forEach(b => { b.id = uid(); b.sets.forEach(s => { s.id = uid(); }); }); });
     setEditing(copy);
   };
-  return <div className="page"><div className="page-heading"><span className="eyebrow">BUILT AROUND YOU</span><h1>Your training<br /><span className="text-accent">blueprint.</span></h1><p>Structure for the days you show up.</p></div>
+  return <div className="page"><div className="page-heading"><h1>Plan</h1><p>Your routines, exercises, and schedule.</p></div>
     <div className="action-row"><button className="button primary" onClick={() => setEditing(newPlan())}><Plus size={18} />New plan</button><button className="button secondary" onClick={() => setLibrary(true)}><Library size={18} />Exercises</button></div>
-    {plans.length === 0 ? <Empty title="Start with a little structure." text="Create your own routine, or use an editable sample template. Choose your own starting weights." action="Explore a starter template" onClick={() => setEditing(starterPlan(profile))} />
+    {plans.length === 0 ? <Empty title="Choose a starting point" text="Create your own routine, or use an editable sample template. Choose your own starting weights." action="Explore a starter template" onClick={() => setEditing(starterPlan(profile))} />
       : <div className="plan-grid">{plans.map(plan => <article className={`plan-card ${plan.active ? 'is-active' : ''}`} key={plan.id}>
         <div className="card-top"><span className={plan.active ? 'pill accent' : 'pill'}>{plan.active ? <><Check size={13} />Active plan</> : 'Saved plan'}</span><span className="small-muted">{plan.schedule === 'week' ? 'Weekly schedule' : 'Rotation'}</span></div>
         <h2>{plan.name}</h2>{plan.description && <p>{plan.description}</p>}<p>{plan.workouts.length} workouts · {plan.workouts.reduce((n, w) => n + w.blocks.length, 0)} exercise slots</p>
@@ -50,8 +50,14 @@ export function PlanEditor({ initial, onClose, onSave, saveLabel = 'Save plan', 
     if (next < 0 || next >= w.blocks.length) return;
     [w.blocks[blockIndex], w.blocks[next]] = [w.blocks[next], w.blocks[blockIndex]];
   });
-  return <Modal title={title ?? (saveLabel === 'Save plan' ? 'Plan editor' : 'Review proposal')} onClose={onClose} wide>
-    <div className="form-grid"><label>Plan name<input value={plan.name} maxLength={100} onChange={e => setPlan({ ...plan, name: e.target.value })} /></label><label>Schedule<select value={plan.schedule} onChange={e => setPlan({ ...plan, schedule: e.target.value as Plan['schedule'], cursor: 0 })}><option value="week">Weekday schedule</option><option value="rotation">Rotating sequence</option></select></label></div>
+  const closeEditor = () => {
+    if (saving) return;
+    if (JSON.stringify(plan) !== JSON.stringify(initial) && !window.confirm('Discard unsaved plan changes?')) return;
+    onClose();
+  };
+  return <Modal title={title ?? (saveLabel === 'Save plan' ? 'Plan editor' : 'Review proposal')} onClose={closeEditor} wide>
+    <div className="plan-editor">
+    <div className="form-grid plan-basics"><label>Plan name<input value={plan.name} maxLength={100} onChange={e => setPlan({ ...plan, name: e.target.value })} /></label><label>Schedule<select value={plan.schedule} onChange={e => setPlan({ ...plan, schedule: e.target.value as Plan['schedule'], cursor: 0 })}><option value="week">Weekday schedule</option><option value="rotation">Rotating sequence</option></select></label></div>
     <label>Plan description<textarea value={plan.description ?? ''} maxLength={2000} rows={2} onChange={e => setPlan({ ...plan, description: e.target.value })} placeholder="What is this plan designed to help you do?" /></label>
     <p className="field-hint">{plan.schedule === 'week' ? 'Choose training days for each workout. Missed days do not move the rest of the week.' : 'Complete the next workout to advance. Train whenever it works for you.'}</p>
     <div className="workout-tabs">{plan.workouts.map((w, i) => <button key={w.id} className={i === index ? 'selected' : ''} onClick={() => setIndex(i)}>{w.name || `Workout ${i + 1}`}</button>)}<button aria-label="Add workout" onClick={() => { setPlan({ ...plan, workouts: [...plan.workouts, { id: uid(), name: `Workout ${String.fromCharCode(65 + plan.workouts.length)}`, days: [], blocks: [] }] }); setIndex(plan.workouts.length); }}><Plus size={18} /></button></div>
@@ -73,7 +79,7 @@ export function PlanEditor({ initial, onClose, onSave, saveLabel = 'Save plan', 
       const exercise = exercises.find(e => e.id === block.exerciseId);
       return <section className="editor-block" key={block.id}><div className="block-heading"><span className="exercise-icon"><Dumbbell size={19} /></span><button className="exercise-name" onClick={() => setChoosing(block.id)}><strong>{exercise?.name}</strong><small>{exercise?.muscle} · tap to substitute</small></button><div className="inline-actions"><button className="icon-button" aria-label={`Move ${exercise?.name} up`} disabled={bi === 0} onClick={() => moveBlock(bi, -1)}><ArrowUp size={16} /></button><button className="icon-button" aria-label={`Move ${exercise?.name} down`} disabled={bi === workout.blocks.length - 1} onClick={() => moveBlock(bi, 1)}><ArrowDown size={16} /></button><button className="icon-button danger" aria-label={`Remove ${exercise?.name}`} onClick={() => changeWorkout(w => { w.blocks = w.blocks.filter(b => b.id !== block.id); })}><X size={17} /></button></div></div>
         <div className="form-grid compact"><label>Rest (seconds)<input type="number" min={0} max={1800} inputMode="numeric" value={block.restSeconds} onChange={e => changeBlock(block.id, b => { b.restSeconds = Number(e.target.value); })} /></label><label>Superset group<select value={block.supersetId ?? ''} onChange={e => changeBlock(block.id, b => { b.supersetId = e.target.value || null; })}><option value="">None</option>{['A', 'B', 'C', 'D'].map(group => <option key={group} value={`superset-${group}`}>Group {group}</option>)}</select></label></div>
-        <div className="prescription-header"><span>TYPE</span><span>REPS</span><span>{profile.unit.toUpperCase()} TARGET</span><span /></div>
+        <div className="prescription-header"><span>Set type</span><span>Reps</span><span>{profile.unit} target</span><span /></div>
         {block.sets.map((set, si) => <div className="prescription-row" key={set.id}><select aria-label={`Set ${si + 1} type for ${exercise?.name}`} value={set.kind} onChange={e => changeBlock(block.id, b => {
           const target = b.sets[si]; target.kind = e.target.value as typeof set.kind;
           if (target.kind !== 'drop') { if (target.kind === 'warmup') target.chainId = null; }
@@ -95,6 +101,7 @@ export function PlanEditor({ initial, onClose, onSave, saveLabel = 'Save plan', 
         await onSave(plan);
       }); setSaving(false);
     }}>{saving ? 'Saving…' : saveLabel}<Check size={18} /></button></div>
+    </div>
     {choosing && <ExercisePicker onClose={() => setChoosing(null)} onChoose={exercise => {
       if (choosing === 'new') changeWorkout(w => { w.blocks.push(newBlock(exercise.id)); });
       else changeBlock(choosing, b => { b.exerciseId = exercise.id; });

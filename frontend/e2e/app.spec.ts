@@ -118,7 +118,7 @@ test('empty history, onboarding editing, responsive layout and navigation', asyn
   await page.getByRole('button', { name: 'Let’s get started' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('link', { name: 'History', exact: true }).click();
-  await expect(page.getByText('Your first chapter is ahead.')).toBeVisible();
+  await expect(page.getByText('No completed workouts yet')).toBeVisible();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page.getByLabel('What are you working toward?')).toHaveValue('Build strength and train consistently');
   await page.getByRole('combobox', { name: 'Weight unit', exact: true }).selectOption('kg');
@@ -203,7 +203,7 @@ test('connected Coach sends through the API and labels the saved reply', async (
   await page.getByLabel('Message Coach').fill('How should I begin?');
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.getByText('Start with two training days.')).toBeVisible();
-  await expect(page.getByText('COACH · CHATGPT')).toBeVisible();
+  await expect(page.getByText('Coach · ChatGPT', { exact: true })).toBeVisible();
   expect(calls).toHaveLength(1);
   expect(calls[0]).toMatchObject({ message: { role: 'user', text: 'How should I begin?' },
     trainingDataReady: false });
@@ -215,7 +215,7 @@ test('connected Coach sends through the API and labels the saved reply', async (
   await page.getByRole('link', { name: 'Coach', exact: true }).click();
   await expect(page.getByText('Start with two training days.')).toBeVisible();
   await page.getByRole('button', { name: 'New conversation' }).click();
-  await expect(page.getByText('Training with', { exact: false })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'What would help today?', exact: true })).toBeVisible();
   await page.locator('.coach-conversation-select').filter({ hasText: 'How should I begin?' }).click();
   await expect(page.getByText('Start with two training days.')).toBeVisible();
   page.once('dialog', dialog => dialog.accept('Bench notes'));
@@ -344,9 +344,9 @@ test('custom exercise, superset flow and durable rest timer', async ({ page }) =
   await logSet(page, 1, '50', '8', 'Cable chest press');
   await expect(page.getByRole('complementary', { name: 'Rest timer', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Pause timer', exact: true }).click();
-  await expect(page.getByText('REST PAUSED')).toBeVisible();
+  await expect(page.getByText('Paused', { exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByText('REST PAUSED')).toBeVisible();
+  await expect(page.getByText('Paused', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Resume timer', exact: true }).click();
   await page.getByRole('button', { name: 'Skip timer', exact: true }).click();
   await expect(page.getByRole('complementary', { name: 'Rest timer', exact: true })).toHaveCount(0);
@@ -431,8 +431,10 @@ test('conflict review shows both versions and queues a manual result', async ({ 
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Review versions' }).click();
   const review = page.getByRole('dialog', { name: 'Resolve sync conflict' });
-  await expect(review.locator('summary', { hasText: 'This device' })).toBeVisible();
-  await expect(review.locator('summary', { hasText: 'Cloud' })).toBeVisible();
+  await expect(review.getByRole('heading', { name: 'This device', exact: true })).toBeVisible();
+  await expect(review.getByRole('heading', { name: 'Cloud', exact: true })).toBeVisible();
+  await expect(review.locator('.conflict-version').first()).toContainText('Device goal');
+  await expect(review.locator('.conflict-version').last()).toContainText('Cloud goal');
   await review.getByRole('button', { name: 'Edit and merge' }).click();
   await review.getByRole('button', { name: 'Use cloud value' }).first().click();
   await review.getByRole('textbox', { name: 'Goals', exact: true }).fill('Combined goal');
@@ -628,6 +630,7 @@ for (const decision of ['accept', 'reject', 'stale'] as const) {
     expect(stored.blocks[0].sets[0].reps).toBe(decision === 'accept' ? 5 : 8);
     if (decision === 'accept') {
       await page.getByRole('link', { name: 'History', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Session journal', exact: true })).toBeVisible();
       await expect(page.getByText('Recorded squat workout', { exact: true })).toBeVisible();
     }
   });
@@ -718,4 +721,111 @@ test.describe('Coach active workout tools', () => {
       }
     });
   }
+});
+
+test.describe('Coach context and account memory', () => {
+  test.use({ serviceWorkers: 'block' });
+
+  test('shows background summaries and keeps maintenance running on Today', async ({ page, context }) => {
+    mockConversations(context);
+    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173', 'Access-Control-Allow-Headers': 'authorization,content-type,if-match', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS' };
+    let maintenanceCalls = 0;
+    await context.route('https://api.example.com/v1/chatgpt/connection', route => route.fulfill({ headers, json: { connected: true, planUsageGranted: true } }));
+    await context.route('https://api.example.com/v1/coach/maintenance', route => {
+      if (route.request().method() !== 'OPTIONS') maintenanceCalls++;
+      return route.fulfill({ headers, json: { processed: true, memoryChanged: false } });
+    });
+    await context.route('https://api.example.com/v1/coach/conversations/*/context', route => route.fulfill({ headers,
+      json: { enabled: true, summaryAvailable: true, summary: 'Earlier decision: train two days each week.', maintenancePending: false, compactionWaiting: false } }));
+    await openApp(page);
+    await page.getByRole('link', { name: 'Coach', exact: true }).click();
+    await expect(page.getByText('Using earlier-chat summary.')).toBeVisible();
+    await page.getByText('View earlier-chat summary', { exact: true }).click();
+    await expect(page.getByText('Earlier decision: train two days each week.')).toBeVisible();
+    await page.getByRole('link', { name: 'Today', exact: true }).click();
+    const previous = maintenanceCalls;
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect.poll(() => maintenanceCalls).toBeGreaterThan(previous);
+  });
+
+  test('edits and forgets memory using versions and disables automatic saving', async ({ page, context }) => {
+    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173', 'Access-Control-Allow-Headers': 'authorization,content-type,if-match', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS' };
+    let content = 'I prefer dumbbells.'; let automatic = true; let deleted = false; let version = 1;
+    await context.route('https://api.example.com/v1/coach/memor**', async route => {
+      const method = route.request().method();
+      if (method === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      if (method !== 'GET') {
+        expect(route.request().headers()['if-match']).toBe(`"${version}"`);
+        if (route.request().url().endsWith('/memory-settings')) automatic = route.request().postDataJSON().automatic;
+        else if (method === 'PATCH') content = route.request().postDataJSON().content;
+        else deleted = true;
+        version++;
+        return route.fulfill({ headers, status: method === 'DELETE' ? 204 : 200, json: method === 'DELETE' ? undefined : { saved: true } });
+      }
+      return route.fulfill({ headers, json: { enabled: true, automatic, etag: `"${version}"`, capacityReached: false,
+        items: deleted ? [] : [{ id: 'memory-1', content, category: 'preference', edited: version > 1, updatedAt: new Date().toISOString(), etag: `"${version}"`, sources: [] }] } });
+    });
+    await openApp(page);
+    await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    await expect(page.getByText('I prefer dumbbells.', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Edit memory', exact: true }).click();
+    await page.getByLabel('Edit remembered fact').fill('I prefer barbells.');
+    await page.getByRole('button', { name: 'Save memory', exact: true }).click();
+    await expect(page.getByText('I prefer barbells.', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Forget memory', exact: true }).click();
+    await expect(page.getByText('No saved memories yet.')).toBeVisible();
+    await page.getByLabel('Automatically save useful training facts').uncheck();
+    await expect(page.getByLabel('Automatically save useful training facts')).not.toBeChecked();
+    await expect.poll(() => automatic).toBe(false);
+  });
+});
+
+test('phone task hierarchy keeps workout actions reachable and optional set tools available', async ({ page }) => {
+  await openApp(page);
+  await makePlan(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const start = page.getByRole('button', { name: 'Start workout', exact: true });
+  const navigation = page.getByRole('navigation', { name: 'Main navigation' });
+  const startBox = await start.boundingBox();
+  const navBox = await navigation.boundingBox();
+  expect(startBox).not.toBeNull(); expect(navBox).not.toBeNull();
+  expect(startBox!.y + startBox!.height).toBeLessThan(navBox!.y);
+  await start.click();
+  await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Effort & set options' }).click();
+  await page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true }).fill('8');
+  await logSet(page, 1, '100', '8');
+  await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toHaveValue('8');
+  await expect(page.getByRole('button', { name: 'Delete set 1 Barbell squat', exact: true })).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: 'Effort & set options' }).click();
+  await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toHaveValue('8');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Finish workout', exact: true }).click();
+  await page.getByRole('button', { name: 'Save completed workout', exact: true }).click();
+  await page.getByRole('link', { name: /Strength A/ }).click();
+  await page.getByRole('button', { name: 'Effort & set options' }).click();
+  await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toHaveValue('8');
+  await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toBeDisabled();
+});
+
+test('plan editor keeps Save reachable and protects unsaved changes', async ({ page }) => {
+  await openApp(page);
+  await makePlan(page);
+  await page.getByRole('link', { name: 'Plan', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit plan', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Plan editor', exact: true });
+  await dialog.getByLabel('Plan name', { exact: true }).fill('Unsaved plan title');
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const saveBox = await dialog.getByRole('button', { name: 'Save plan', exact: true }).boundingBox();
+  expect(saveBox).not.toBeNull();
+  expect(saveBox!.y).toBeGreaterThan(0);
+  expect(saveBox!.y + saveBox!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  page.once('dialog', prompt => prompt.dismiss());
+  await dialog.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(dialog.getByLabel('Plan name', { exact: true })).toHaveValue('Unsaved plan title');
+  await dialog.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Unsaved plan title', exact: true })).toBeVisible();
 });

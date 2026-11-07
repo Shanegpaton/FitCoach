@@ -33,7 +33,7 @@ async def test_completed_stream_only_and_required_request_fields(monkeypatch):
     def respond(request):
         if request.url.path == '/v1/models':
             return httpx.Response(200, json={'models': [
-                {'slug': 'hidden', 'visibility': 'hidden'}, {'slug': 'available', 'visibility': 'list'}]})
+                {'slug': 'hidden', 'visibility': 'hidden'}, {'slug': 'available', 'visibility': 'list', 'context_window': 32000}]})
         assert request.headers['Authorization'] == 'Bearer secret-access'
         body = json.loads(request.content)
         assert body['model'] == 'available'
@@ -53,7 +53,7 @@ async def test_completed_stream_only_and_required_request_fields(monkeypatch):
 async def test_failed_stream_never_returns_partial_reply(monkeypatch):
     def respond(request):
         if request.url.path == '/v1/models':
-            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list', 'context_window': 32000}]})
         return httpx.Response(200, text='data: {"type":"response.output_text.delta","delta":"Partial"}\n\n'
             'data: {"type":"response.failed","response":{"error":{"code":"subscription_sharing_usage_limit_exceeded"}}}\n\n')
     real = httpx.AsyncClient
@@ -70,7 +70,7 @@ async def test_agent_turn_exposes_completed_function_call(monkeypatch):
             'arguments': '{}', 'call_id': 'call-1'}
     def respond(request):
         if request.url.path == '/v1/models':
-            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list', 'context_window': 32000}]})
         body = json.loads(request.content)
         assert body['store'] is False and body['stream'] is True
         assert body['tools'][0]['name'] == 'get_training_profile'
@@ -96,7 +96,7 @@ async def test_agent_turn_reads_final_text_after_tool_output(monkeypatch):
                    {'type': 'function_call_output', 'call_id': 'call-1', 'output': '{"plan":"A/B"}'}]
     def respond(request):
         if request.url.path == '/v1/models':
-            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list', 'context_window': 32000}]})
         assert json.loads(request.content)['input'] == input_items
         event = {'type': 'response.completed', 'response': {'output': [reply]}}
         return httpx.Response(200, text=f'data: {json.dumps(event)}\n\n')
@@ -112,7 +112,7 @@ async def test_agent_turn_returns_refusal_text_instead_of_unsupported_reply(monk
     refusal = {'type': 'message', 'content': [{'type': 'refusal', 'refusal': 'I can’t help with that request.'}]}
     def respond(request):
         if request.url.path == '/v1/models':
-            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list', 'context_window': 32000}]})
         event = {'type': 'response.completed', 'response': {'output': [refusal]}}
         return httpx.Response(200, text=f'data: {json.dumps(event)}\n\n')
     real = httpx.AsyncClient
@@ -126,7 +126,7 @@ async def test_agent_turn_returns_refusal_text_instead_of_unsupported_reply(monk
 async def test_agent_turn_uses_streamed_text_when_completion_omits_output(monkeypatch):
     def respond(request):
         if request.url.path == '/v1/models':
-            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list', 'context_window': 32000}]})
         return httpx.Response(200, text='data: {"type":"response.output_text.delta","delta":"Train today."}\n\n'
             'data: {"type":"response.completed","response":{"status":"completed","output":[]}}\n\n')
     real = httpx.AsyncClient
@@ -141,7 +141,7 @@ async def test_agent_turn_uses_completed_stream_item_for_function_call(monkeypat
     call = {'type': 'function_call', 'name': 'get_training_profile', 'arguments': '{}', 'call_id': 'call-1'}
     def respond(request):
         if request.url.path == '/v1/models':
-            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list', 'context_window': 32000}]})
         item = {'type': 'response.output_item.done', 'output_index': 0, 'item': call}
         done = {'type': 'response.completed', 'response': {'status': 'completed', 'output': []}}
         return httpx.Response(200, text=f'data: {json.dumps(item)}\n\ndata: {json.dumps(done)}\n\n')
@@ -159,7 +159,7 @@ async def test_agent_turn_retries_empty_completed_response_once(monkeypatch):
     def respond(request):
         nonlocal attempts
         if request.url.path == '/v1/models':
-            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list', 'context_window': 32000}]})
         attempts += 1
         body = json.loads(request.content)
         if attempts == 1:
@@ -182,7 +182,7 @@ async def test_agent_turn_retries_empty_completed_response_once(monkeypatch):
 async def test_agent_turn_rejects_incomplete_stream(monkeypatch):
     def respond(request):
         if request.url.path == '/v1/models':
-            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list'}]})
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list', 'context_window': 32000}]})
         return httpx.Response(200, text='data: {"type":"response.output_text.delta","delta":"Partial"}\n\n')
     real = httpx.AsyncClient
     monkeypatch.setattr(inference.httpx, 'AsyncClient',

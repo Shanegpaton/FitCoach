@@ -99,8 +99,8 @@ export function ChatGPTConnection() {
     finally { setBusy(false); }
   };
 
-  return <section className="settings-card"><SectionTitle title="ChatGPT connection"><Link2 size={20} /></SectionTitle>
-    <p>Sign in on OpenAI’s page in the VM browser. After sign-in, the verified credentials are encrypted in the account-scoped backend database. If you grant plan usage, Coach can answer with ChatGPT while online.</p>
+  return <section id="coach-connection" className="settings-card"><SectionTitle title="ChatGPT connection"><Link2 size={20} /></SectionTitle>
+    <p>Connect your ChatGPT account to use Coach online. Review permission on OpenAI’s sign-in page. Your connection is stored encrypted for your FitCoach account.</p>
     {!chatgptVmUrl ? <p className="field-hint">The VM connection is not configured for this app deployment yet.</p>
       : !available ? <p className="field-hint">Sign in to FitCoachGPT while online to connect ChatGPT.</p>
         : connection === null ? <p aria-live="polite">Checking VM connection…</p>

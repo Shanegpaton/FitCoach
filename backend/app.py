@@ -26,6 +26,8 @@ if __package__:
     from .domain import Exercise, Page, Plan, Profile, ScheduleOverride, Session
     from . import schema as db_schema
     from . import chatgpt_credentials as chatgpt
+    from .agent import context_store as contexts
+    from .agent.context_routes import register_context_routes
     from .agent import inference
     from .agent.graph import build_coach_graph
     from .agent.tools.database import TOOL_SPECS, run_database_tool
@@ -41,6 +43,8 @@ else:
     from domain import Exercise, Page, Plan, Profile, ScheduleOverride, Session
     import schema as db_schema
     import chatgpt_credentials as chatgpt
+    from agent import context_store as contexts
+    from agent.context_routes import register_context_routes
     from agent import inference
     from agent.graph import build_coach_graph
     from agent.tools.database import TOOL_SPECS, run_database_tool
@@ -328,10 +332,7 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                     raise HTTPException(409, 'ChatGPT connection changed during disconnect; retry')
         return {'cleared': True, 'revocationConfirmed': revoked}
 
-    @app.post('/v1/chatgpt/coach')
-    async def chatgpt_coach(body: CoachRequest, user: User):
-        if body.message.role != 'user':
-            raise HTTPException(422, 'A Coach turn must contain one user message.')
+    async def coach_credentials(user):
         # Hold the account row lock during refresh so concurrent workers cannot rotate
         # the same single-use refresh token independently.
         async with database.sessions() as session:
@@ -355,6 +356,15 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                     await session.execute(sa.text('''UPDATE fitcoach.chatgpt_credentials
                         SET ciphertext = :ciphertext, updated_at = now() WHERE user_id = :user_id'''),
                         {'user_id': user, 'ciphertext': chatgpt.encrypt_record(record)})
+        return record
+
+    register_context_routes(app, database, coach_credentials)
+
+    @app.post('/v1/chatgpt/coach')
+    async def chatgpt_coach(body: CoachRequest, user: User):
+        if body.message.role != 'user':
+            raise HTTPException(422, 'A Coach turn must contain one user message.')
+        record = await coach_credentials(user)
         claim = await begin_turn(database, user, body.conversationId, body.requestId, body.message.text)
         if claim['replay']:
             proposal = None
@@ -365,12 +375,23 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                     'messageId': claim['assistantMessageId']}
         try:
             async with processing_turn(database, user, body.conversationId, body.requestId, claim['attemptId']):
-                thread_id, history = await conversation_messages(database, user, body.conversationId)
-                # The new user turn was persisted by begin_turn and is already in this
-                # server-owned bounded history. Never append a client transcript.
+                context_session = None
+                budget = await inference.resolve_model(record['access_token'])
+                if contexts.enabled():
+                    async with contexts.transaction(database, user, True) as session:
+                        latest = await session.scalar(sa.text('SELECT max(sequence) FROM fitcoach.coach_messages WHERE conversation_id=:c'), {'c': body.conversationId})
+                        await contexts.ensure(session, user, body.conversationId, memory_floor=max(0, latest-1))
+                    context_session = contexts.ContextSession(database, user, body.conversationId, record['access_token'],
+                        budget, TOOL_SPECS if body.trainingDataReady else [], body.trainingDataReady)
+                    history = []  # ContextSession supplies the server-owned transcript on every call.
+                else:
+                    _, history = await conversation_messages(database, user, body.conversationId)
+
                 async def respond(input_items):
+                    if context_session:
+                        return await context_session.respond(input_items, body.trainingDataReady)
                     return await inference.complete_agent_turn(record['access_token'], input_items,
-                        TOOL_SPECS if body.trainingDataReady else [], body.trainingDataReady)
+                        TOOL_SPECS if body.trainingDataReady else [], body.trainingDataReady, budget=budget)
 
                 async def run_tool(name, arguments):
                     if not body.trainingDataReady:
@@ -390,11 +411,18 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                     # explicitly instead of relying on the connection default.
                     await checkpointer.conn.execute('SET search_path TO public')
                     graph = build_coach_graph(respond, run_tool, checkpointer=checkpointer)
-                    result = await graph.ainvoke({'input': [{'role': m['role'], 'content': m['text']} for m in history]},
+                    result = await graph.ainvoke({'input': [{'role': m['role'], 'content': m['text']} for m in history],
+                    'tool_calls': 0, 'tool_bytes': 0, 'proposal': None, 'output': [], 'text': ''},
                         config={'configurable': {'thread_id': claim['threadId']}})
                 metadata = {'artifacts': ([{'id': result['proposal']['id'], 'type': ('workout_edit_proposal' if result['proposal']['type'] in ('session_modify', 'session_create') else 'training_plan_proposal')}]
                                           if result.get('proposal') else [])}
                 assistant_message_id = await finish_turn(database, user, body.conversationId, body.requestId, result['text'], metadata, attempt_id=claim['attemptId'])
+                if contexts.enabled():
+                    try:
+                        await contexts.queue_memory(database, user, body.conversationId)
+                        await context_session.queue_next()
+                    except Exception:
+                        logger.warning('Coach maintenance enqueue will retry on next visit')
         except inference.InferenceError as exc:
             await fail_turn(database, user, body.conversationId, body.requestId, attempt_id=claim['attemptId'])
             raise HTTPException(exc.status, exc.message) from None
@@ -405,7 +433,8 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
             await fail_turn(database, user, body.conversationId, body.requestId, attempt_id=claim['attemptId'])
             raise
         return {'text': result['text'], 'proposal': result.get('proposal'), 'replayed': False,
-                'messageId': assistant_message_id, 'userMessageId': claim['userMessageId']}
+                'messageId': assistant_message_id, 'userMessageId': claim['userMessageId'],
+                'context': await contexts.status(database, user, body.conversationId) if contexts.enabled() else None}
 
     @app.post('/v1/coach/conversations', status_code=201)
     async def coach_create_conversation(body: ConversationCreate, user: User):
