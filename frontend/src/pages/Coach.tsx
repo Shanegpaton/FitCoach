@@ -3,7 +3,7 @@ import { CoachContextStatus } from '../coachContext';
 import Markdown from 'react-markdown';
 import { Link } from 'react-router';
 import remarkGfm from 'remark-gfm';
-import { ArrowRight, Check, MessageCircle, Plus, Send, Sparkles, X, Pencil, Trash2 } from 'lucide-react';
+import { ArrowRight, Check, MessageCircle, Plus, Send, Sparkles, X, Pencil, Trash2, ChevronDown, Search } from 'lucide-react';
 import { db, applyProposal, cacheApprovedProposal, enqueueChange, putLocalChange, syncRootId } from '../db';
 import { assistantMessage, sampleCoach, isWorkoutProposal } from '../coach';
 import { BackendError, backendChatGPTRequest, backendRequest, liveCoach, type ChatGPTConnection } from '../chatgptVm';
@@ -11,6 +11,7 @@ import { useAuth } from '../auth';
 import { formatLoad, uid, type Exercise, type Message, type Plan, type Profile, type Proposal } from '../domain';
 import { useApp } from '../state';
 import { PlanEditor } from './Plans';
+import { Modal, ProposalReadiness } from '../ui';
 import { WorkoutProposal } from './WorkoutProposal';
 import type { ServerProposal, ServerWorkoutProposal } from '../coach';
 
@@ -77,8 +78,8 @@ interface CoachContextValue {
   send: (value?: string) => Promise<void>;
   createConversation: () => Promise<void>;
   selectConversation: (id: string) => void;
-  renameConversation: (id: string, title: string) => Promise<void>;
-  deleteConversation: (id: string) => Promise<void>;
+  renameConversation: (id: string, title: string) => Promise<boolean | undefined>;
+  deleteConversation: (id: string) => Promise<boolean | undefined>;
   setServerProposals: React.Dispatch<React.SetStateAction<Proposal[]>>;
 }
 
@@ -399,12 +400,15 @@ export function CoachProvider({ children }: { children: ReactNode }) {
   };
 
   const selectConversation = (id: string) => {
+    if (id === activeConversationId) return;
+    setServerMessages([]);
+    setServerProposals([]); setWorkoutProposals([]);
     setActiveConversationId(id);
   };
 
   const renameConversation = async (id: string, title: string) => {
     if (!userId) return;
-    await run(async () => {
+    return await run(async () => {
       const updated = await backendRequest<{ id: string; title: string; updatedAt: string }>(userId, `coach/conversations/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) });
       setConversations(items => items.map(item => item.id === updated.id ? updated : item));
     });
@@ -412,7 +416,7 @@ export function CoachProvider({ children }: { children: ReactNode }) {
 
   const deleteConversation = async (id: string) => {
     if (!userId) return;
-    await run(async () => {
+    return await run(async () => {
       await backendRequest(userId, `coach/conversations/${id}`, { method: 'DELETE' });
       const remaining = conversations.filter(item => item.id !== id);
       setConversations(remaining);
@@ -492,91 +496,71 @@ export function Coach() {
     setServerProposals,
   } = useCoach();
 
+  const [chatsOpen, setChatsOpen] = useState(false);
+  const [chatSearch, setChatSearch] = useState('');
+  const [editingChat, setEditingChat] = useState<{ id: string; title: string } | null>(null);
+  const [deletingChat, setDeletingChat] = useState<{ id: string; title: string } | null>(null);
+  const [chatBusy, setChatBusy] = useState(false);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  const activeChat = conversations.find(item => item.id === activeConversationId);
+  const blocked = sending || (recovery !== null && recovery !== 'failed') || mode === 'checking' || (mode === 'chatgpt' && !activeConversationId);
+  useEffect(() => {
+    const input = composer.current;
+    if (input) { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 144)}px`; }
+  }, [text]);
+
   const bottom = useRef<HTMLDivElement>(null);
+  const scrollPane = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
+  const [unreadReply, setUnreadReply] = useState(false);
+  useEffect(() => {
+    const scroll = scrollPane.current;
+    const track = () => { if (scroll) { following.current = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 120; if (following.current) setUnreadReply(false); } };
+    scroll?.addEventListener('scroll', track, { passive: true });
+    return () => scroll?.removeEventListener('scroll', track);
+  }, []);
 
   useEffect(() => {
     initCoach();
   }, [initCoach]);
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'end' });
+    if (!messages.length && !sending) { following.current = true; setUnreadReply(false); scrollPane.current?.scrollTo(0, 0); return; }
+    if (following.current) bottom.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'end' });
+    else if (!sending) setUnreadReply(true);
   }, [messages.length, sending]);
 
   return (
     <div className="page coach-page">
-      <div className="coach-top">
-        <div>
-          <h1>Coach</h1>
+      <header className="coach-header">
+        <div className="coach-heading"><h1>Coach</h1><span className="coach-mode">{mode === 'chatgpt' ? 'ChatGPT Coach' : mode === 'checking' ? 'Connecting…' : 'Sample Coach'}</span></div>
+        <div className="coach-header-actions">
+          {mode === 'chatgpt' ? <>
+            <button className="button secondary coach-chats-button" onClick={() => { setChatSearch(''); setChatsOpen(true); }}><MessageCircle size={18} /><span>Chats</span><ChevronDown size={15} /></button>
+            <button className="icon-button" aria-label="New conversation" title="New conversation" disabled={blocked || !userId || !navigator.onLine || chatBusy} onClick={async () => { setChatBusy(true); try { await createConversation(); } finally { setChatBusy(false); } }}><Plus size={21} /></button>
+          </> : mode === 'sample' ? <Link to="/settings#coach-connection" className="text-button">Connect ChatGPT</Link> : null}
         </div>
-        {mode === 'sample' ? <Link to="/settings#coach-connection" className="button secondary">Connect ChatGPT</Link> : <button
-          className="button secondary"
-          aria-label="New conversation"
-          title={mode !== 'chatgpt' ? 'Connect ChatGPT in Settings to create conversations' : 'Start a new conversation'}
-          disabled={sending || mode !== 'chatgpt' || !userId || !navigator.onLine}
-          onClick={() => void createConversation()}
-        >
-          <Plus size={18} />New chat
-        </button>}
-      </div>
-
-      {mode === 'chatgpt' && conversations.length > 0 && (
-        <nav className="coach-conversations" aria-label="Coach conversations">
-          {conversations.map(conversation => (
-            <div className={`coach-conversation ${conversation.id === activeConversationId ? 'active' : ''}`} key={conversation.id}>
-              <button
-                className="coach-conversation-select"
-                aria-current={conversation.id === activeConversationId ? 'page' : undefined}
-                onClick={() => selectConversation(conversation.id)}
-              >
-                <span>{conversation.title}</span>
-                <small>{new Date(conversation.updatedAt).toLocaleDateString()}</small>
-              </button>
-              <button
-                className="icon-button"
-                aria-label={`Rename ${conversation.title}`}
-                onClick={() => {
-                  const title = window.prompt('Conversation name', conversation.title)?.trim();
-                  if (title && userId) void renameConversation(conversation.id, title);
-                }}
-              >
-                <Pencil size={15} />
-              </button>
-              <button
-                className="icon-button"
-                aria-label={`Delete ${conversation.title}`}
-                onClick={() => {
-                  if (!window.confirm(`Delete “${conversation.title}” and its conversation history?`)) return;
-                  if (userId) void deleteConversation(conversation.id);
-                }}
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
-          ))}
-        </nav>
-      )}
-
-      <div className="demo-banner">
-        <span className="pill accent"><Sparkles size={13} />{mode === 'chatgpt' ? 'ChatGPT Coach' : 'Sample Coach'}</span>
-        <p>
-          {mode === 'chatgpt'
-            ? `Using your connected ChatGPT plan. Conversations are saved to your account. ${trainingDataReady ? 'Your synced training data is available to Coach.' : 'Your training data is still syncing; general questions are available.'}`
-            : mode === 'checking'
-              ? 'Checking your ChatGPT connection…'
-              : 'Sample responses are available offline or without ChatGPT plan permission.'}
-        </p>
-      </div>
+      </header>
+      {mode === 'chatgpt' && <p className="coach-chat-title">{activeChat?.title ?? 'Opening conversation…'}</p>}
+      <details className="coach-info">
+        <summary>{mode === 'chatgpt' ? 'Saved to your account' : mode === 'checking' ? 'Checking your ChatGPT connection…' : 'Sample responses · saved on this device'}</summary>
+        <p>{mode === 'chatgpt' ? 'Using your connected ChatGPT plan. Conversations are saved to your account.' : 'Sample responses are available offline or without ChatGPT plan permission. These are examples, not live AI replies.'}</p>
+        <Link to="/settings#coach-connection">{mode === 'chatgpt' ? 'Manage connection' : 'Connect ChatGPT for online coaching'}</Link>
+      </details>
+      {mode === 'chatgpt' && <p className="coach-sync-status" role="status">{trainingDataReady ? 'Your synced training data is available to Coach.' : 'Training data is syncing. You can ask general questions.'}</p>}
+      <div className="coach-scroll" ref={scrollPane}>
     {mode === 'chatgpt' && <CoachContextStatus key={`${userId}:${activeConversationId}`} conversationId={activeConversationId} sending={sending} />}
 
       {messages.length === 0 && (
         <div className="coach-welcome">
           <h2>What would help today?</h2>
+          <p>{mode === 'chatgpt' ? 'Talk through your training, adjust your plan, or review a workout.' : 'Try a sample conversation, or connect ChatGPT for online coaching.'}</p>
           <div className="conversation-starters">
             {(mode === 'chatgpt'
               ? [['How should I start training?', 'Get practical first steps'], ['Explain my plan', 'Understand your routine'], ['How should I recover?', 'Talk through rest and recovery']]
               : [['Build a sample plan', 'An editable starting point'], ['Explain my plan', 'Get to know your routine'], ['Change my rest periods', 'Preview a plan adjustment']]
             ).map(([title, description]) => (
-              <button key={title} onClick={() => void send(title)}>
+              <button key={title} disabled={blocked} onClick={() => void send(title)}>
                 <div><strong>{title}</strong><small>{description}</small></div>
                 <ArrowRight size={18} />
               </button>
@@ -635,6 +619,7 @@ export function Coach() {
                       {proposal.expiresAt ? `Expires ${new Date(proposal.expiresAt).toLocaleString()}. ` : ''}
                       Review the stored exercise selections, sets, reps, and rest periods.
                     </small>
+                    {proposal.status === 'pending' && proposal.serverProposalId && <ProposalReadiness ready={trainingDataReady} />}
                     {proposal.status === 'pending' ? (
                       <div className="proposal-actions">
                         {proposal.serverProposalId ? (
@@ -704,7 +689,7 @@ export function Coach() {
         {sending && (
           <div className="message assistant">
             <span className="message-avatar"><Sparkles size={17} /></span>
-            <div className="typing" aria-label="Preparing Coach response"><i /><i /><i /></div>
+            <div className="typing" role="status" aria-label="Preparing Coach response"><i /><i /><i /></div>
           </div>
         )}
         <div ref={bottom} />
@@ -719,9 +704,12 @@ export function Coach() {
         </p>
       )}
 
+      </div>
+      {unreadReply && <button className="text-button new-reply" onClick={() => { following.current = true; setUnreadReply(false); bottom.current?.scrollIntoView({ block: 'end' }); }}>Go to latest reply</button>}
       <form className="chat-composer" onSubmit={e => { e.preventDefault(); void send(); }}>
         <label className="sr-only" htmlFor="chat-input">Message Coach</label>
         <textarea
+          ref={composer}
           id="chat-input"
           value={text}
           maxLength={5000}
@@ -729,7 +717,7 @@ export function Coach() {
           placeholder="Ask about your training"
           rows={1}
           onKeyDown={e => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
               e.preventDefault();
               void send();
             }
@@ -738,7 +726,7 @@ export function Coach() {
         <button
           aria-label="Send message"
           className="send-button"
-          disabled={sending || (recovery !== null && recovery !== 'failed') || mode === 'checking' || (mode === 'chatgpt' && !activeConversationId) || !text.trim()}
+          disabled={blocked || !text.trim()}
           type="submit"
         >
           <Send size={18} />
@@ -747,8 +735,51 @@ export function Coach() {
 
       <p className="composer-caption">
         <MessageCircle size={12} />
-        {mode === 'chatgpt' ? 'Using your ChatGPT plan · saved to your account' : 'Sample conversation · saved on this device'}
+        {sending ? 'Preparing a reply…' : 'Enter adds a new line. Use Send when you’re ready.'}
       </p>
+
+      {chatsOpen && <Modal title="Your conversations" onClose={() => setChatsOpen(false)}>
+        <label className="coach-chat-search"><span><Search size={16} />Find a conversation</span><input type="search" value={chatSearch} onChange={e => setChatSearch(e.target.value)} placeholder="Search by title" /></label>
+        <nav className="coach-chat-list" aria-label="Coach conversations">
+          {conversations.filter(item => item.title.toLowerCase().includes(chatSearch.trim().toLowerCase())).map(conversation => <div className="coach-chat-row" key={conversation.id}>
+            <button className="coach-conversation-select" aria-current={conversation.id === activeConversationId ? 'page' : undefined} disabled={sending || chatBusy} onClick={() => { following.current = true; setUnreadReply(false); selectConversation(conversation.id); setChatsOpen(false); }}><span>{conversation.title}</span><small>{conversation.id === activeConversationId ? 'Current chat · ' : ''}{new Date(conversation.updatedAt).toLocaleDateString()}</small></button>
+            <button className="icon-button" aria-label={`Rename ${conversation.title}`} disabled={sending || chatBusy} onClick={() => setEditingChat(conversation)}><Pencil size={18} /></button>
+            <button className="icon-button" aria-label={`Delete ${conversation.title}`} disabled={sending || chatBusy} onClick={() => setDeletingChat(conversation)}><Trash2 size={18} /></button>
+          </div>)}
+          {!conversations.some(item => item.title.toLowerCase().includes(chatSearch.trim().toLowerCase())) && <p className="field-hint">No conversations match. Try another title.</p>}
+        </nav>
+      </Modal>}
+      {editingChat && <Modal title="Rename conversation" onClose={() => { if (!chatBusy) setEditingChat(null); }}>
+        <form onSubmit={async e => {
+          e.preventDefault();
+          if (!editingChat.title.trim() || chatBusy) return;
+          setChatBusy(true);
+          try {
+            if (await renameConversation(editingChat.id, editingChat.title.trim())) setEditingChat(null);
+          } finally { setChatBusy(false); }
+        }}>
+          <label>Conversation name
+            <input value={editingChat.title} maxLength={160} required onChange={e => setEditingChat({ ...editingChat, title: e.target.value })} />
+          </label>
+          <div className="action-row">
+            <button className="button primary" disabled={chatBusy || !editingChat.title.trim()}>{chatBusy ? 'Saving…' : 'Save name'}</button>
+            <button type="button" className="button secondary" disabled={chatBusy} onClick={() => setEditingChat(null)}>Cancel</button>
+          </div>
+        </form>
+      </Modal>}
+      {deletingChat && <Modal title="Delete conversation?" onClose={() => { if (!chatBusy) setDeletingChat(null); }}>
+        <p>Delete “{deletingChat.title}” and its conversation history? This cannot be undone. Your training plans and logged workouts stay saved.</p>
+        <div className="action-row">
+          <button className="button secondary" disabled={chatBusy} onClick={() => setDeletingChat(null)}>Keep conversation</button>
+          <button className="button primary" disabled={chatBusy} onClick={async () => {
+            if (chatBusy) return;
+            setChatBusy(true);
+            try {
+              if (await deleteConversation(deletingChat.id)) setDeletingChat(null);
+            } finally { setChatBusy(false); }
+          }}>{chatBusy ? 'Deleting…' : 'Delete conversation'}</button>
+        </div>
+      </Modal>}
 
       {review && (
         <PlanEditor

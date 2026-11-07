@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ArrowRight, ArrowUpRight, CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Dumbbell, Flame, Info, MoveRight, Plus, Sparkles } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
 import { createSession, db, putLocalChange } from '../db';
@@ -14,6 +14,8 @@ export function Today() {
   const [moving, setMoving] = useState(false);
   const [moveDate, setMoveDate] = useState(localDate());
   const [viewingWorkout, setViewingWorkout] = useState<Workout | null>(null);
+  const [blockedWorkout, setBlockedWorkout] = useState<Workout | null>(null);
+  const starting = useRef(false);
 
   // Only the active plan should determine the scheduled workouts on the calendar.
   const plan = plans.find(p => p.active);
@@ -32,13 +34,18 @@ export function Today() {
   const week = weeklyStats(sessions, 1)[0];
 
   const start = async (workoutToStart: Workout) => {
-    if (active) { navigate(`/workout/${active.id}`); return; }
-    if (!plan) return;
-    await run(async () => {
+    if (active) {
+      if (active.workoutId === workoutToStart.id) navigate(`/workout/${active.id}`);
+      else setBlockedWorkout(workoutToStart);
+      return;
+    }
+    if (!plan || starting.current) return;
+    starting.current = true;
+    try { await run(async () => {
       const session = startSession(plan, workoutToStart, exercises, date);
       await createSession(session);
       navigate(`/workout/${session.id}`);
-    });
+    }); } finally { starting.current = false; }
   };
 
   const monday = atNoon(date);
@@ -265,6 +272,7 @@ export function Today() {
         <Link className="text-button" to="/coach"><Plus size={16} />Try a sample Coach plan</Link>
       )}
 
+      {blockedWorkout && active && <Modal title="Workout already in progress" onClose={() => setBlockedWorkout(null)}><p>{active.name} is still in progress. Finish it before starting {blockedWorkout.name}. Your recorded sets are kept.</p><div className="action-row"><Link className="button primary" to={`/workout/${active.id}`}>Resume {active.name}</Link><button className="button secondary" onClick={() => { setViewingWorkout(blockedWorkout); setBlockedWorkout(null); }}>Review {blockedWorkout.name}</button></div></Modal>}
       {viewingWorkout && (
         <Modal title={viewingWorkout.name} onClose={() => setViewingWorkout(null)}>
           <p className="field-hint">

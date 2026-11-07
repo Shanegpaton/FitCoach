@@ -216,13 +216,21 @@ test('connected Coach sends through the API and labels the saved reply', async (
   await expect(page.getByText('Start with two training days.')).toBeVisible();
   await page.getByRole('button', { name: 'New conversation' }).click();
   await expect(page.getByRole('heading', { name: 'What would help today?', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Chats', exact: true }).click();
+  await page.getByRole('searchbox', { name: 'Find a conversation' }).fill('How should');
   await page.locator('.coach-conversation-select').filter({ hasText: 'How should I begin?' }).click();
   await expect(page.getByText('Start with two training days.')).toBeVisible();
-  page.once('dialog', dialog => dialog.accept('Bench notes'));
+  await page.getByRole('button', { name: 'Chats', exact: true }).click();
   await page.getByRole('button', { name: /Rename How should I begin/ }).click();
+  await page.getByRole('textbox', { name: 'Conversation name', exact: true }).fill('Bench notes');
+  await page.getByRole('button', { name: 'Save name', exact: true }).click();
+  await page.getByRole('searchbox', { name: 'Find a conversation' }).fill('');
   await expect(page.locator('.coach-conversation-select').filter({ hasText: 'Bench notes' })).toBeVisible();
-  page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: /Delete Bench notes/ }).click();
+  await page.getByRole('button', { name: 'Keep conversation', exact: true }).click();
+  await expect(page.locator('.coach-conversation-select').filter({ hasText: 'Bench notes' })).toBeVisible();
+  await page.getByRole('button', { name: /Delete Bench notes/ }).click();
+  await page.getByRole('button', { name: 'Delete conversation', exact: true }).click();
   await expect(page.locator('.coach-conversation-select').filter({ hasText: 'New conversation' })).toBeVisible();
 });
 });
@@ -332,6 +340,7 @@ test('custom exercise, superset flow and durable rest timer', async ({ page }) =
   await custom.getByLabel('Name', { exact: true }).fill('Cable chest press');
   await custom.getByLabel('Muscle group', { exact: true }).fill('Chest');
   await custom.getByRole('button', { name: 'Save exercise', exact: true }).click();
+  for (const options of await page.locator('.advanced-prescription > summary').all()) await options.click();
   const groups = page.getByRole('combobox', { name: 'Superset group', exact: true });
   await groups.nth(0).selectOption('superset-A'); await groups.nth(1).selectOption('superset-A');
   await page.getByRole('button', { name: 'Save plan', exact: true }).click();
@@ -791,20 +800,20 @@ test('phone task hierarchy keeps workout actions reachable and optional set tool
   expect(startBox).not.toBeNull(); expect(navBox).not.toBeNull();
   expect(startBox!.y + startBox!.height).toBeLessThan(navBox!.y);
   await start.click();
-  await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Effort & set options' }).click();
+  await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toBeHidden();
+  await page.getByLabel('Set 1 options for Barbell squat', { exact: true }).click();
   await page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true }).fill('8');
   await logSet(page, 1, '100', '8');
   await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toHaveValue('8');
   await expect(page.getByRole('button', { name: 'Delete set 1 Barbell squat', exact: true })).toBeVisible();
   await page.reload();
-  await page.getByRole('button', { name: 'Effort & set options' }).click();
+  await page.getByLabel('Set 1 options for Barbell squat', { exact: true }).click();
   await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toHaveValue('8');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole('button', { name: 'Finish workout', exact: true }).click();
   await page.getByRole('button', { name: 'Save completed workout', exact: true }).click();
   await page.getByRole('link', { name: /Strength A/ }).click();
-  await page.getByRole('button', { name: 'Effort & set options' }).click();
+  await page.getByLabel('Set 1 options for Barbell squat', { exact: true }).click();
   await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toHaveValue('8');
   await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toBeDisabled();
 });
@@ -828,4 +837,208 @@ test('plan editor keeps Save reachable and protects unsaved changes', async ({ p
   await dialog.getByRole('button', { name: 'Save plan', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Unsaved plan title', exact: true })).toBeVisible();
+});
+
+async function expectUsable(page: Page, control: import('@playwright/test').Locator) {
+  await expect.poll(async () => {
+    await control.scrollIntoViewIfNeeded();
+    return control.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return box.y >= 0 && box.bottom <= innerHeight && (element === hit || element.contains(hit));
+    });
+  }).toBe(true);
+}
+
+test('modal validation stays visible and weekday reassignment requires a choice', async ({ page }) => {
+  await openApp(page);
+  await page.getByRole('link', { name: 'Plan', exact: true }).click();
+  await page.getByRole('button', { name: 'New plan', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Plan editor', exact: true });
+  await editor.getByLabel('Plan name', { exact: true }).fill('');
+  await editor.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await expect(editor.getByRole('alert')).toContainText('Enter a plan name.');
+  await expect(editor.getByRole('alert')).toBeFocused();
+  await expect(editor.getByLabel('Plan name', { exact: true })).toHaveAttribute('aria-invalid', 'true');
+  await editor.getByLabel('Plan name', { exact: true }).fill('Schedule review');
+  await editor.getByLabel('Workout name', { exact: true }).fill('Monday A');
+  await editor.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await expect(editor.getByRole('alert')).toContainText('Add at least one exercise');
+  const monday = editor.getByRole('button', { name: 'Monday', exact: true });
+  if (await monday.getAttribute('aria-pressed') !== 'true') await monday.click();
+  await editor.getByRole('button', { name: 'Add workout', exact: true }).click();
+  await editor.getByLabel('Workout name', { exact: true }).fill('Monday B');
+  await editor.getByRole('button', { name: 'Monday', exact: true }).click();
+  const move = page.getByRole('dialog', { name: 'Move training day?', exact: true });
+  await expect(move).toContainText('Monday A');
+  await move.getByRole('button', { name: 'Keep current schedule' }).click();
+  await expect(editor.getByRole('button', { name: 'Monday', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await editor.getByRole('button', { name: 'Monday', exact: true }).click();
+  await move.getByRole('button', { name: 'Move day', exact: true }).click();
+  await expect(editor.getByRole('button', { name: 'Monday', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await editor.getByRole('button', { name: 'Monday A', exact: true }).click();
+  await expect(editor.getByRole('button', { name: 'Monday', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  // Errors from nested forms must also stay inside their native dialog.
+  await editor.getByRole('button', { name: 'Add exercise', exact: true }).click();
+  await page.getByRole('button', { name: 'Create custom exercise', exact: true }).click();
+  const exercise = page.getByRole('dialog', { name: 'Custom exercise', exact: true });
+  await exercise.getByRole('button', { name: 'Save exercise', exact: true }).click();
+  await expect(exercise.getByRole('alert')).toBeVisible();
+  await expectUsable(page, exercise.getByRole('button', { name: 'Dismiss notification' }));
+});
+
+test('profile drafts survive navigation and reload without overwriting a changed profile', async ({ page }) => {
+  await openApp(page);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByLabel('What are you working toward?').fill('Retained draft goal');
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.getByLabel('What are you working toward?')).toHaveValue('Retained draft goal');
+  await page.reload();
+  await expect(page.getByLabel('What are you working toward?')).toHaveValue('Retained draft goal');
+  await page.evaluate(async () => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open('fitcoach-user-e2e-user');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result, tx = db.transaction('profile', 'readwrite'), table = tx.objectStore('profile');
+      const read = table.get('profile');
+      read.onsuccess = () => table.put({ ...read.result, goals: 'Changed saved goal' });
+      tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
+    };
+  }));
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Save profile', exact: true })).toBeDisabled();
+  await expect(page.getByLabel('What are you working toward?')).toHaveValue('Retained draft goal');
+  await page.getByRole('button', { name: 'Keep draft values', exact: true }).click();
+  await page.getByRole('button', { name: 'Save profile', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Profile saved on this device' }).first()).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('What are you working toward?')).toHaveValue('Retained draft goal');
+});
+
+test('workout and Coach controls stay unobscured, and repeat set requires confirmation', async ({ page }) => {
+  await openApp(page); await makePlan(page);
+  await page.getByRole('button', { name: 'Start workout', exact: true }).click();
+  for (const size of [{ width: 320, height: 740 }, { width: 390, height: 480 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(size);
+    await expectUsable(page, page.getByRole('spinbutton', { name: 'Reps set 3 Barbell squat', exact: true }));
+    await expectUsable(page, page.getByRole('button', { name: 'Finish workout', exact: true }));
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await logSet(page, 1, '100', '8');
+  const weight = page.getByRole('spinbutton', { name: 'Weight set 2 Barbell squat', exact: true });
+  await expect(weight).toHaveValue('');
+  await page.getByRole('button', { name: 'Repeat last set into set 2 Barbell squat', exact: true }).click();
+  await expect(weight).toHaveValue('100');
+  await expect(page.getByRole('spinbutton', { name: 'Reps set 2 Barbell squat', exact: true })).toHaveValue('8');
+  await expect(page.getByRole('button', { name: 'Complete set 2 Barbell squat', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await page.reload(); await expect(weight).toHaveValue('100');
+  await page.getByRole('link', { name: 'Coach', exact: true }).click();
+  await expectUsable(page, page.getByRole('button', { name: /Change my rest periods/ }));
+  const input = page.getByLabel('Message Coach');
+  await input.fill('First line'); await input.press('Enter'); await input.pressSequentially('Second line');
+  await expect(input).toHaveValue('First line\nSecond line');
+  await expectUsable(page, input);
+  await expectUsable(page, page.getByRole('button', { name: 'Send message' }));
+  const initialHeight = await input.evaluate(element => element.clientHeight);
+  await input.fill(Array(8).fill('A longer training question').join('\n'));
+  await expect.poll(() => input.evaluate(element => element.clientHeight)).toBeGreaterThan(initialHeight);
+  for (const size of [{ width: 320, height: 740 }, { width: 390, height: 480 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(size);
+    await expectUsable(page, input);
+    await expectUsable(page, page.getByRole('button', { name: 'Send message' }));
+    await expectUsable(page, page.getByRole('link', { name: 'Connect ChatGPT', exact: true }));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  const composer = await page.locator('.chat-composer').boundingBox();
+  const resume = await page.locator('.resume-bar').boundingBox();
+  expect(composer!.y + composer!.height).toBeLessThanOrEqual(resume!.y);
+});
+
+test('selecting another workout explains the active session instead of redirecting', async ({ page }) => {
+  await openApp(page); await makePlan(page);
+  await page.getByRole('button', { name: 'Start workout', exact: true }).click();
+  await logSet(page, 1, '100', '8');
+  await page.getByRole('link', { name: 'Plan', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit plan', exact: true }).click();
+  await page.getByRole('button', { name: 'Add workout', exact: true }).click();
+  await page.getByLabel('Workout name', { exact: true }).fill('Strength B');
+  await page.getByRole('button', { name: 'Add exercise', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Choose an exercise' }).getByRole('button', { name: /Barbell squat/ }).click();
+  await page.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('button', { name: /Strength B/ }).click();
+  const blocked = page.getByRole('dialog', { name: 'Workout already in progress' });
+  await expect(blocked).toContainText('Strength A is still in progress');
+  await blocked.getByRole('button', { name: 'Review Strength B' }).click();
+  await expect(page.getByRole('dialog', { name: 'Strength B', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await page.getByRole('link', { name: /Resume/ }).last().click();
+  await expect(page.getByRole('spinbutton', { name: 'Weight set 1 Barbell squat', exact: true })).toHaveValue('100');
+});
+
+test('large history keeps trends reachable and offers a searchable paginated journal', async ({ page }) => {
+  await openApp(page); await makePlan(page);
+  await page.getByRole('button', { name: 'Start workout', exact: true }).click(); await logSet(page, 1, '100', '8');
+  await page.getByRole('button', { name: 'Finish workout', exact: true }).click();
+  await page.getByRole('button', { name: 'Save completed workout', exact: true }).click();
+  await page.evaluate(async () => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open('fitcoach-user-e2e-user'); request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result, tx = db.transaction('sessions', 'readwrite'), table = tx.objectStore('sessions');
+      const read = table.getAll();
+      read.onsuccess = () => { const original = read.result[0]; for (let i = 1; i <= 60; i++) { const date = new Date(); date.setDate(date.getDate() - i); table.put({ ...original, id: `history-fixture-${i}`, name: `Archive ${i}`, date: date.toISOString().slice(0, 10) }); } };
+      tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
+    };
+  }));
+  await page.reload();
+  await expect(page.locator('.history-row')).toHaveCount(3);
+  expect((await page.locator('.chart-card').boundingBox())!.y).toBeLessThan(1200);
+  await page.getByRole('button', { name: 'View all 61 sessions' }).click();
+  const journal = page.getByRole('dialog', { name: 'All sessions', exact: true });
+  await expect(journal.locator('.history-row')).toHaveCount(20);
+  await journal.getByRole('button', { name: 'Show more sessions' }).click();
+  await expect(journal.locator('.history-row')).toHaveCount(40);
+  await journal.getByLabel('Search sessions').fill('Archive 60');
+  await expect(journal.locator('.history-row')).toHaveCount(1);
+  await journal.getByRole('link', { name: /Archive 60/ }).click();
+  await expect(page.getByRole('heading', { name: 'Archive 60', exact: true })).toBeVisible();
+});
+
+test('profile drafts stay isolated when switching accounts and remain recoverable', async ({ page }) => {
+  await openApp(page);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByLabel('What are you working toward?').fill('Private account A draft');
+  const switchAccount = async (id: string) => {
+    await page.addInitScript(({ userId }) => {
+      const key = 'sb-fitcoach-e2e-auth-token';
+      const session = JSON.parse(localStorage.getItem(key)!);
+      session.user.id = userId; session.user.email = `${userId}@example.com`;
+      localStorage.setItem(key, JSON.stringify(session));
+    }, { userId: id });
+    await page.reload();
+  };
+  await switchAccount('e2e-other-user');
+  await page.getByRole('button', { name: 'Skip for now' }).click();
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.getByLabel('What are you working toward?')).toHaveValue('');
+  await page.getByLabel('What are you working toward?').fill('Private account B draft');
+  await switchAccount('e2e-user');
+  await expect(page.getByLabel('What are you working toward?')).toHaveValue('Private account A draft');
+});
+
+
+test('phone day choices preserve touch targets without horizontal page overflow', async ({ page }) => {
+  await openApp(page);
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  for (const day of await page.locator('#training-profile .day-picker button').all()) {
+    const box = await day.boundingBox(); expect(box!.width).toBeGreaterThanOrEqual(44); expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  for (const day of await page.locator('.week-strip button').all()) {
+    const box = await day.boundingBox(); expect(box!.width).toBeGreaterThanOrEqual(44); expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  expect(await page.locator('#main-content').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
 });

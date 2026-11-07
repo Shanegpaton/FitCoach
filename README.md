@@ -55,7 +55,11 @@ Open `http://localhost:4173` once online, then test offline. Service-worker cach
 
 ### What you can do
 
-The phone UI puts Start/Resume ahead of the calendar on Today and recent sessions ahead of trends in History. Workout rows emphasize actual weight, reps, and completion; **Effort & set options** reveals optional RPE and set removal. The plan editor keeps Save accessible while scrolling and asks before discarding unsaved edits. Settings includes direct links to profile, synchronization/backups, ChatGPT, memory, and installation.
+The phone UI puts Start/Resume ahead of the calendar on Today and three recent sessions ahead of trends in History. **View all sessions** opens a searchable journal in pages of 20. Navigation, Resume, notifications, and workout actions reserve their own space outside the scrolling content, including when the visible viewport shrinks for a phone keyboard. On narrow phones, profile day choices wrap and the week strip can scroll horizontally to retain touch-sized targets.
+
+Workout rows show actual weight and reps separately from targets. **Repeat last set** explicitly copies a completed earlier set's weight and reps without completing the new set. Each row has **Effort & options** for optional RPE and removal. Workout edits save locally as you edit; the save status distinguishes saving, saved, and failed changes. In Coach, Enter inserts a newline; Ctrl/Command+Enter or the Send button sends.
+
+Plans remain drafts until Save; errors appear inside their dialog and moving an occupied training day requires confirmation. Rest/superset and drop-set tools are expandable. Profile edits remain account-scoped drafts in this tab's session storage across navigation and reload until **Save profile** applies them. If the saved profile changes meanwhile, compare it with the draft before choosing which values to keep. Drafts are separate from synchronized training records and workout backups. Settings includes links to profile, synchronization/backups, ChatGPT, memory, and installation.
 
 - Skip or complete a brief training profile, then edit it in Settings.
 - Create, duplicate, reorder, and edit routines with weekday or rotating schedules.
@@ -72,6 +76,8 @@ Today, Plan, Coach, and History are the four primary tabs. Weight progression is
 Chat messages render Markdown, including headings, emphasis, lists, links, code blocks, and tables. Wide tables and code blocks scroll within the message on small screens.
 
 Coach uses ChatGPT for freeform conversation when the signed-in account has granted ChatGPT plan usage and the API is reachable. Connected conversations are stored in PostgreSQL and can be reopened from another signed-in device; each has its own LangGraph thread. New Chat, switching, renaming, and deletion are available in Coach. Offline or disconnected Coach continues to use labeled sample responses and editable sample plan proposals. Review and apply a proposal to save it; proposals do not change your plan automatically. Live replies can create durable server-backed plan proposals using account-scoped plans, exercise definitions, profile information, and recorded performance. The Coach renders the structured preview and requires explicit approval or rejection. Approval is online-only and requires a clean local sync state; the API rechecks account ownership and source ETag before applying the plan through the same aggregate writer used by sync. Conversation history does not enter workout sync or IndexedDB outbox mutations. The typed `ChatAdapter` in `frontend/src/coach.ts` keeps the two modes separate.
+
+Coach uses a compact header with searchable conversation history under **Chats**. Rename and delete actions open in-app dialogs; deleting a conversation keeps training plans and workout records. Connection details are expandable, and the message composer grows with longer drafts.
 
 The PWA does not currently call Ollama or the Python backend. That existing backend and its scientific corpus remain available separately below.
 

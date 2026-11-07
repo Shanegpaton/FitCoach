@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowRight, ArrowUp, Check, ChevronRight, Copy, Dumbbell, Library, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { db, putLocalChange, savePlan } from '../db';
 import { starterPlan } from '../catalog';
-import { exerciseSchema, formatLoad, newBlock, newPlan, newSet, normalizeDropChains, toKg, uid, type Block, type Exercise, type Plan } from '../domain';
+import { exerciseSchema, planSchema, formatLoad, newBlock, newPlan, newSet, normalizeDropChains, toKg, uid, type Block, type Exercise, type Plan } from '../domain';
 import { useApp } from '../state';
 import { Days, Empty, Modal, SectionTitle } from '../ui';
 
@@ -33,11 +33,38 @@ export function Plans() {
 }
 
 export function PlanEditor({ initial, onClose, onSave, saveLabel = 'Save plan', title }: { initial: Plan; onClose: () => void; onSave: (plan: Plan) => Promise<void>; saveLabel?: string; title?: string }) {
-  const { exercises, profile, run } = useApp();
+  const { exercises, profile } = useApp();
   const [plan, setPlan] = useState(() => structuredClone(initial));
   const [index, setIndex] = useState(0);
   const [choosing, setChoosing] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [validation, setValidation] = useState<{ message: string; name?: boolean; workoutName?: boolean } | null>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => setValidation(null), [plan]);
+  const [dayMove, setDayMove] = useState<{ days: number[]; description: string } | null>(null);
+  const applyDays = (days: number[]) => setPlan(current => ({ ...current, workouts: current.workouts.map((w, i) => i === index ? { ...w, days } : { ...w, days: w.days.filter(d => !days.includes(d)) }) }));
+  const chooseDays = (days: number[]) => {
+    const added = days.filter(day => !plan.workouts[index].days.includes(day));
+    const occupied = plan.workouts.filter((w, i) => i !== index && w.days.some(day => added.includes(day)));
+    if (occupied.length) {
+      const names = added.map(day => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][day]).join(', ');
+      setDayMove({ days, description: `${names} is assigned to ${occupied.map(w => w.name).join(', ')}. Move it to ${plan.workouts[index].name}?` });
+    } else applyDays(days);
+  };
+  const save = async () => {
+    const parsed = planSchema.safeParse(plan);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const workoutIndex = typeof issue.path[1] === 'number' ? issue.path[1] : index;
+      if (issue.path[0] === 'workouts') setIndex(workoutIndex);
+      const name = issue.path[0] === 'name';
+      const workoutName = issue.path[2] === 'name';
+      setValidation({ name, workoutName, message: name ? 'Enter a plan name.' : workoutName ? 'Enter a workout name.' : issue.path[2] === 'blocks' && !plan.workouts[workoutIndex].blocks.length ? `Add at least one exercise to ${plan.workouts[workoutIndex].name || 'this workout'}.` : issue.message });
+      requestAnimationFrame(() => errorRef.current?.focus()); return;
+    }
+    setValidation(null); setSaving(true);
+    try { await onSave(parsed.data); } finally { setSaving(false); }
+  };
   const workout = plan.workouts[index];
   const changeWorkout = (update: (workout: Plan['workouts'][number]) => void) => setPlan(current => {
     const copy = structuredClone(current); update(copy.workouts[index]); return copy;
@@ -57,11 +84,13 @@ export function PlanEditor({ initial, onClose, onSave, saveLabel = 'Save plan', 
   };
   return <Modal title={title ?? (saveLabel === 'Save plan' ? 'Plan editor' : 'Review proposal')} onClose={closeEditor} wide>
     <div className="plan-editor">
-    <div className="form-grid plan-basics"><label>Plan name<input value={plan.name} maxLength={100} onChange={e => setPlan({ ...plan, name: e.target.value })} /></label><label>Schedule<select value={plan.schedule} onChange={e => setPlan({ ...plan, schedule: e.target.value as Plan['schedule'], cursor: 0 })}><option value="week">Weekday schedule</option><option value="rotation">Rotating sequence</option></select></label></div>
+    {validation && <div className="form-error" role="alert" tabIndex={-1} ref={errorRef} id="plan-validation"><strong>Check your plan</strong><p>{validation.message}</p>{validation.name && <a href="#plan-name">Go to plan name</a>}{validation.workoutName && <a href="#workout-name">Go to workout name</a>}</div>}
+    <p className="field-hint">Changes stay in this draft until you choose {saveLabel.toLowerCase()}.</p>
+    <div className="form-grid plan-basics"><label>Plan name<input id="plan-name" aria-invalid={validation?.name || undefined} aria-describedby={validation?.name ? 'plan-validation' : undefined} value={plan.name} maxLength={100} onChange={e => setPlan({ ...plan, name: e.target.value })} /></label><label>Schedule<select value={plan.schedule} onChange={e => setPlan({ ...plan, schedule: e.target.value as Plan['schedule'], cursor: 0 })}><option value="week">Weekday schedule</option><option value="rotation">Rotating sequence</option></select></label></div>
     <label>Plan description<textarea value={plan.description ?? ''} maxLength={2000} rows={2} onChange={e => setPlan({ ...plan, description: e.target.value })} placeholder="What is this plan designed to help you do?" /></label>
     <p className="field-hint">{plan.schedule === 'week' ? 'Choose training days for each workout. Missed days do not move the rest of the week.' : 'Complete the next workout to advance. Train whenever it works for you.'}</p>
     <div className="workout-tabs">{plan.workouts.map((w, i) => <button key={w.id} className={i === index ? 'selected' : ''} onClick={() => setIndex(i)}>{w.name || `Workout ${i + 1}`}</button>)}<button aria-label="Add workout" onClick={() => { setPlan({ ...plan, workouts: [...plan.workouts, { id: uid(), name: `Workout ${String.fromCharCode(65 + plan.workouts.length)}`, days: [], blocks: [] }] }); setIndex(plan.workouts.length); }}><Plus size={18} /></button></div>
-    <div className="workout-edit-heading"><label>Workout name<input value={workout.name} maxLength={100} onChange={e => changeWorkout(w => { w.name = e.target.value; })} /></label><div className="inline-actions"><button className="icon-button" aria-label="Move workout earlier" disabled={index === 0} onClick={() => {
+    <div className="workout-edit-heading"><label>Workout name<input id="workout-name" aria-invalid={validation?.workoutName || undefined} aria-describedby={validation?.workoutName ? 'plan-validation' : undefined} value={workout.name} maxLength={100} onChange={e => changeWorkout(w => { w.name = e.target.value; })} /></label><div className="inline-actions"><button className="icon-button" aria-label="Move workout earlier" disabled={index === 0} onClick={() => {
       const workouts = [...plan.workouts]; [workouts[index - 1], workouts[index]] = [workouts[index], workouts[index - 1]]; setPlan({ ...plan, workouts, cursor: 0 }); setIndex(index - 1);
     }}><ArrowUp size={17} /></button><button className="icon-button" aria-label="Move workout later" disabled={index === plan.workouts.length - 1} onClick={() => {
       const workouts = [...plan.workouts]; [workouts[index + 1], workouts[index]] = [workouts[index], workouts[index + 1]]; setPlan({ ...plan, workouts, cursor: 0 }); setIndex(index + 1);
@@ -74,11 +103,11 @@ export function PlanEditor({ initial, onClose, onSave, saveLabel = 'Save plan', 
         setPlan({ ...plan, cursor: 0, workouts: plan.workouts.filter(w => w.id !== workout.id) }); setIndex(Math.max(0, index - 1));
       }
     }}><Trash2 size={17} /></button></div></div>
-    {plan.schedule === 'week' && <label className="days-label">Training days<Days value={workout.days} onChange={days => setPlan(current => ({ ...current, workouts: current.workouts.map((w, i) => i === index ? { ...w, days } : { ...w, days: w.days.filter(d => !days.includes(d)) }) }))} /></label>}
+    {plan.schedule === 'week' && <label className="days-label">Training days<Days value={workout.days} onChange={chooseDays} /></label>}
     <div className="editor-blocks">{workout.blocks.map((block, bi) => {
       const exercise = exercises.find(e => e.id === block.exerciseId);
       return <section className="editor-block" key={block.id}><div className="block-heading"><span className="exercise-icon"><Dumbbell size={19} /></span><button className="exercise-name" onClick={() => setChoosing(block.id)}><strong>{exercise?.name}</strong><small>{exercise?.muscle} · tap to substitute</small></button><div className="inline-actions"><button className="icon-button" aria-label={`Move ${exercise?.name} up`} disabled={bi === 0} onClick={() => moveBlock(bi, -1)}><ArrowUp size={16} /></button><button className="icon-button" aria-label={`Move ${exercise?.name} down`} disabled={bi === workout.blocks.length - 1} onClick={() => moveBlock(bi, 1)}><ArrowDown size={16} /></button><button className="icon-button danger" aria-label={`Remove ${exercise?.name}`} onClick={() => changeWorkout(w => { w.blocks = w.blocks.filter(b => b.id !== block.id); })}><X size={17} /></button></div></div>
-        <div className="form-grid compact"><label>Rest (seconds)<input type="number" min={0} max={1800} inputMode="numeric" value={block.restSeconds} onChange={e => changeBlock(block.id, b => { b.restSeconds = Number(e.target.value); })} /></label><label>Superset group<select value={block.supersetId ?? ''} onChange={e => changeBlock(block.id, b => { b.supersetId = e.target.value || null; })}><option value="">None</option>{['A', 'B', 'C', 'D'].map(group => <option key={group} value={`superset-${group}`}>Group {group}</option>)}</select></label></div>
+        <details className="advanced-prescription"><summary>Rest & supersets</summary><div className="form-grid compact"><label>Rest (seconds)<input type="number" min={0} max={1800} inputMode="numeric" value={block.restSeconds} onChange={e => changeBlock(block.id, b => { b.restSeconds = Number(e.target.value); })} /></label><label>Superset group<select value={block.supersetId ?? ''} onChange={e => changeBlock(block.id, b => { b.supersetId = e.target.value || null; })}><option value="">None</option>{['A', 'B', 'C', 'D'].map(group => <option key={group} value={`superset-${group}`}>Group {group}</option>)}</select></label></div></details>
         <div className="prescription-header"><span>Set type</span><span>Reps</span><span>{profile.unit} target</span><span /></div>
         {block.sets.map((set, si) => <div className="prescription-row" key={set.id}><select aria-label={`Set ${si + 1} type for ${exercise?.name}`} value={set.kind} onChange={e => changeBlock(block.id, b => {
           const target = b.sets[si]; target.kind = e.target.value as typeof set.kind;
@@ -88,20 +117,16 @@ export function PlanEditor({ initial, onClose, onSave, saveLabel = 'Save plan', 
           <input type="number" inputMode="numeric" min={1} max={100} aria-label={`Target reps set ${si + 1} for ${exercise?.name}`} value={set.targetReps} onChange={e => changeBlock(block.id, b => { b.sets[si].targetReps = Number(e.target.value); })} />
           <input type="number" inputMode="decimal" step="any" min={0} max={4000} aria-label={`Target weight set ${si + 1} for ${exercise?.name}`} placeholder={exercise?.loadMode === 'bodyweight' ? 'BW' : '—'} value={set.targetKg === null ? '' : formatLoad(set.targetKg, profile.unit)} onChange={e => changeBlock(block.id, b => { b.sets[si].targetKg = e.target.value === '' ? null : toKg(Number(e.target.value), profile.unit); })} />
           <button className="icon-button danger" disabled={block.sets.length === 1} aria-label={`Remove set ${si + 1} from ${exercise?.name}`} onClick={() => changeBlock(block.id, b => { b.sets.splice(si, 1); })}><X size={15} /></button></div>)}
-        <div className="set-add-actions"><button className="text-button" onClick={() => changeBlock(block.id, b => { b.sets.push(newSet()); })}><Plus size={14} />Set</button><button className="text-button" onClick={() => changeBlock(block.id, b => { b.sets.unshift(newSet('warmup')); })}>Warm-up</button><button className="text-button" onClick={() => changeBlock(block.id, b => {
+        <div className="set-add-actions"><button className="text-button" onClick={() => changeBlock(block.id, b => { b.sets.push(newSet()); })}><Plus size={14} />Set</button><button className="text-button" onClick={() => changeBlock(block.id, b => { b.sets.unshift(newSet('warmup')); })}>Warm-up</button><details className="advanced-set-tools"><summary>Drop set options</summary><button className="text-button" onClick={() => changeBlock(block.id, b => {
           const previous = b.sets.at(-1)!; if (previous.kind === 'warmup') return;
           const chain = previous.chainId ?? uid(); previous.chainId = chain; b.sets.push(newSet('drop', chain));
-        })}>Drop set</button></div>
+        })}>Drop set</button></details></div>
       </section>;
     })}</div>
     <button className="button dashed" onClick={() => setChoosing('new')}><Plus size={18} />Add exercise</button>
-    <div className="editor-footer"><p className="field-hint">Targets are yours to choose. Existing workout logs stay unchanged.</p><button className="button primary" disabled={saving} onClick={async () => {
-      setSaving(true); await run(async () => {
-        if (plan.workouts.some(w => w.blocks.length === 0)) throw new Error('Add at least one exercise to every workout.');
-        await onSave(plan);
-      }); setSaving(false);
-    }}>{saving ? 'Saving…' : saveLabel}<Check size={18} /></button></div>
+    <div className="editor-footer"><p className="field-hint">Targets are yours to choose. Existing workout logs stay unchanged.</p><button className="button primary" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : saveLabel}<Check size={18} /></button></div>
     </div>
+    {dayMove && <Modal title="Move training day?" onClose={() => setDayMove(null)}><p>{dayMove.description}</p><p className="field-hint">The other workout will no longer be scheduled on this day. The change applies when you save the plan.</p><div className="action-row"><button className="button secondary" onClick={() => setDayMove(null)}>Keep current schedule</button><button className="button primary" onClick={() => { applyDays(dayMove.days); setDayMove(null); }}>Move day</button></div></Modal>}
     {choosing && <ExercisePicker onClose={() => setChoosing(null)} onChoose={exercise => {
       if (choosing === 'new') changeWorkout(w => { w.blocks.push(newBlock(exercise.id)); });
       else changeBlock(choosing, b => { b.exerciseId = exercise.id; });

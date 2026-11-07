@@ -2,13 +2,21 @@ import { useState, type FormEvent } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { ArrowLeft, ArrowRight, Check, Download, HardDrive, RefreshCw, ShieldCheck, Smartphone, Upload } from 'lucide-react';
 import { Link } from 'react-router';
-import { backupSchema, type Backup, type Profile } from '../domain';
+import { backupSchema, profileSchema, type Backup, type Profile } from '../domain';
 import { db, exportBackup, importBackup, putLocalChange } from '../db';
 import { useApp } from '../state';
 import { Days, Modal, SectionTitle } from '../ui';
 import { ConflictReview } from './ConflictReview';
 import { CoachMemorySettings } from '../coachContext';
 import { ChatGPTConnection } from './ChatGPTConnection';
+import { useProfileDraft } from '../profileDraft';
+
+function describeProfileValue(key: keyof Profile, value: Profile[keyof Profile]) {
+  if (Array.isArray(value)) return value.map(item => key === 'trainingDays' ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][Number(item)] : item).join(', ') || 'None';
+  if (key === 'sessionMinutes') return `${value} minutes`;
+  if (key === 'unit') return value === 'kg' ? 'Kilograms' : 'Pounds';
+  return String(value) || 'Not set';
+}
 
 function TrainingFields({ value, onChange }: { value: Profile; onChange: (profile: Profile) => void }) {
   return <><label>What are you working toward?<textarea value={value.goals} maxLength={2000} rows={3} placeholder="Build muscle, get stronger, feel more consistent…" onChange={e => onChange({ ...value, goals: e.target.value })} /></label>
@@ -29,7 +37,8 @@ export function Onboarding() {
 
 export function Settings() {
   const { profile, run, notify, sessions } = useApp();
-  const [draft, setDraft] = useState(profile);
+  const { draft, base, setDraft, reset, dirty, durable, changedElsewhere, keepDraft } = useProfileDraft(db.name, profile);
+  const [saving, setSaving] = useState(false);
   const [backup, setBackup] = useState<Backup | null>(null);
   const [busy, setBusy] = useState(false);
   const [reviewId, setReviewId] = useState<string | null>(null);
@@ -46,7 +55,19 @@ export function Settings() {
     .sort((a, b) => (b.resolvedAt ?? '').localeCompare(a.resolvedAt ?? '')).slice(0, 5);
   const recoveries = syncRecords.filter(item => item.kind === 'recovery');
   const syncState = syncRecords.find(item => item.kind === 'state');
-  const save = (e: FormEvent) => { e.preventDefault(); void run(() => putLocalChange('profile', { ...draft, onboardingDone: true }, db.profile), 'Profile saved'); };
+  const save = async (e: FormEvent) => {
+    e.preventDefault(); if (saving || changedElsewhere) return;
+    setSaving(true);
+    const database = db;
+    const saved = profileSchema.parse({ ...draft, onboardingDone: true });
+    try {
+      if (await run(() => database.transaction('rw', [database.profile, database.outbox, database.sync], async () => {
+        const current = await database.profile.get('profile');
+        if (JSON.stringify(current && profileSchema.parse(current)) !== JSON.stringify(profileSchema.parse(base))) throw new Error('Your saved profile changed. Your draft is kept; compare the values before saving.');
+        await putLocalChange('profile', saved, database.profile, database);
+      }), 'Profile saved on this device')) reset(saved);
+    } finally { setSaving(false); }
+  };
   const exportFile = async () => {
     await run(async () => {
       const backup = await exportBackup();
@@ -57,7 +78,9 @@ export function Settings() {
   };
   return <div className="page settings-page"><Link to="/" className="text-button"><ArrowLeft size={17} />Back to Today</Link><div className="page-heading compact-heading"><h1>Settings</h1><p>Profile, connections, and saved data.</p></div>
     <nav className="settings-links" aria-label="Settings sections"><a href="#training-profile">Training profile</a><a href="#sync-settings">Sync & backups</a><a href="#coach-connection">ChatGPT</a><a href="#coach-memory">Coach memory</a><a href="#install-app">Install app</a></nav>
-    <form id="training-profile" className="settings-card" onSubmit={save}><SectionTitle title="Training profile" /><TrainingFields value={draft} onChange={setDraft} /><button className="button primary" type="submit">Save profile<Check size={18} /></button></form>
+    <form id="training-profile" className="settings-card" onSubmit={save}><SectionTitle title="Training profile" /><p className="save-status" role={dirty || saving ? 'status' : undefined}>{saving ? 'Saving on this device…' : dirty ? durable ? 'Draft kept on this device. Choose Save profile to apply changes.' : 'Draft kept while this app is open. Save before closing it.' : 'Profile saved on this device'}</p>
+      {changedElsewhere && <div className="form-error"><p>Your saved profile changed while you were editing. Your draft is kept.</p><details><summary>Compare saved profile and draft</summary><dl>{(['goals', 'experience', 'equipment', 'trainingDays', 'sessionMinutes', 'unit'] as const).filter(key => JSON.stringify(profile[key]) !== JSON.stringify(draft[key])).map(key => <div key={key}><dt>{({ goals: 'Goals', experience: 'Experience', equipment: 'Equipment', trainingDays: 'Training days', sessionMinutes: 'Session minutes', unit: 'Weight unit' })[key]}</dt><dd>Saved: {describeProfileValue(key, profile[key])}<br />Draft: {describeProfileValue(key, draft[key])}</dd></div>)}</dl></details><button type="button" className="button secondary" onClick={keepDraft}>Keep draft values</button><button type="button" className="text-button" onClick={() => reset(profile)}>Use saved profile</button></div>}
+      <TrainingFields value={draft} onChange={setDraft} /><button className="button primary" disabled={saving || changedElsewhere} type="submit">{saving ? 'Saving…' : 'Save profile'}<Check size={18} /></button></form>
     <section id="sync-settings" className="settings-card"><SectionTitle title="Synchronization"><HardDrive size={20} /></SectionTitle><div className="privacy-note"><ShieldCheck size={20} /><p>Every change saves on this device first. When you’re online and signed in, your plans and workouts sync to your account. Export a backup before changing phones or clearing browser data.</p></div>
       <p role="status">{failed.length ? `${failed.length} change${failed.length === 1 ? '' : 's'} failed to upload.` : conflicts.length ? `${conflicts.length} conflict${conflicts.length === 1 ? '' : 's'} need your choice.` : pendingSync.length ? `${pendingSync.length} change${pendingSync.length === 1 ? '' : 's'} pending upload.` : 'All changes are synchronized.'}</p>
       <p className="field-hint">{syncState?.updatedAt ? `Last sync activity: ${new Date(syncState.updatedAt).toLocaleString()}` : 'This account has not synchronized on this device yet.'}</p>
@@ -89,10 +112,10 @@ export function Settings() {
     <section id="install-app" className="settings-card"><SectionTitle title="Install FitCoach"><Smartphone size={20} /></SectionTitle><p>Install FitCoach on your home screen after opening it once online. Your plans, logs, timers, and history work offline.</p><div className="install-steps"><div><p><strong>iPhone / iPad</strong>Open in Safari, tap Share, then Add to Home Screen.</p></div><div><p><strong>Android</strong>Open in Chrome, then choose Install app or Add to Home screen in the browser menu.</p></div></div><p className="field-hint">Installation requires HTTPS on phones. ChatGPT Coach requires an online connection and granted plan usage.</p></section>
 
     {backup && <Modal title="Replace local data?" onClose={() => setBackup(null)}><p>This backup contains {backup.plans.length} plans and {backup.sessions.length} sessions. Importing replaces the data currently stored on this device, including {sessions.length} sessions.</p><p className="field-hint">Export your current data first if you want to keep it.</p><div className="action-row"><button className="button secondary" onClick={exportFile}>Export current data</button><button className="button primary" disabled={busy} onClick={async () => {
-      setBusy(true); if (await run(() => importBackup(backup), 'Backup imported')) { setDraft(backup.profile); setBackup(null); } setBusy(false);
+      setBusy(true); if (await run(() => importBackup(backup), 'Backup imported')) { reset(backup.profile); setBackup(null); } setBusy(false);
     }}>{busy ? 'Importing…' : 'Replace & import'}</button></div></Modal>}
     {reviewed && <ConflictReview key={reviewed.id} conflict={reviewed} onClose={() => setReviewId(null)} onResolved={message => {
-      if (reviewed.entity === 'profile') void db.profile.get('profile').then(current => { if (current) setDraft(current); });
+      if (reviewed.entity === 'profile') void db.profile.get('profile').then(current => { if (current && !dirty) reset(current); });
       setReviewId(null); notify(message);
     }} />}
   </div>;

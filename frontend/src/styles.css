@@ -309,17 +309,9 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 .quiet-note { display: flex; align-items: center; gap: 14px; color: #8f9c80; padding: 24px 0; }
 .quiet-note p { font-size: 12px; flex: 1; }
 .coach-page { max-width: 730px; }
-.coach-conversations { display: flex; gap: 7px; overflow-x: auto; padding: 0 0 12px; margin: -10px 0 13px; scrollbar-width: thin; }
-.coach-conversation { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); max-width: min(86vw, 330px); padding: 3px; }
-.coach-conversation.active { border-color: var(--accent); }
 .coach-conversation-select { display: flex; flex-direction: column; gap: 3px; min-width: 90px; max-width: 220px; padding: 7px 9px; text-align: left; background: transparent; border: 0; }
 .coach-conversation-select span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .coach-conversation-select small { color: var(--muted); font-size: 12px; }
-.coach-conversation .icon-button { width: 44px; height: 44px; }
-.coach-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 23px; }
-.coach-top h1 { font-size: 34px; font-weight: 650; }
-.demo-banner { padding: 14px 16px; background: #202819; border: 1px solid #3c4d2c; border-radius: 12px; }
-.demo-banner p { color: #aab799; font-size: 12px; margin-top: 9px; }
 .coach-welcome { padding: 22px 0 0; text-align: left; }
 
 .coach-welcome h2 { font-size: 22px; font-weight: 500; line-height: 1.2; }
@@ -388,7 +380,7 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 .file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; padding: 0; }
 .file-button:focus-within { outline: 2px solid var(--accent); outline-offset: 3px; }
 .settings-card > p { font-size: 14px; color: #aab69b; }
-.chatgpt-viewer { width: 100vw; max-width: none; height: 100dvh; max-height: none; border: 0; margin: 0; color: var(--text); position: fixed; z-index: 110; inset: 0; background: #11150f; display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+.chatgpt-viewer { width: 100vw; max-width: none; height: var(--app-height, 100dvh); max-height: none; border: 0; margin: 0; color: var(--text); position: fixed; z-index: 110; inset: 0; background: #11150f; display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
 .chatgpt-viewer-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid #38452d; }
 .chatgpt-viewer-header > div { display: grid; gap: 3px; }
 .chatgpt-viewer-header strong { font-size: 16px; }
@@ -544,3 +536,122 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 .conflict-version p { font-size: 14px; margin-top: 8px; overflow-wrap: anywhere; }
 .conflict-version strong { display: block; overflow-wrap: anywhere; }
 .conflict-version details { margin-top: 12px; }
+
+/* Reserve space for navigation and actions; only the content pane scrolls. */
+.app-shell { position: fixed; inset: 0 0 auto; width: 100%; height: var(--app-height, 100dvh); min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.app-header, .app-shell > .connection-banner { flex-shrink: 0; }
+#main-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scroll-padding-block: 16px; }
+#main-content:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.app-shell .page { padding-bottom: 24px; }
+.bottom-nav { position: static; transform: none; flex-shrink: 0; margin-inline: auto; width: min(100%, 560px); }
+.resume-bar { position: static; transform: none; flex-shrink: 0; margin: 8px auto; box-shadow: none; width: min(calc(100% - 32px), 660px); }
+.workout-layout { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.workout-layout .workout-page { flex: 1; min-height: 0; overflow-y: auto; width: 100%; margin: 0 auto; scroll-padding-block: 16px; padding-bottom: 24px; }
+.session-actions { position: static; transform: none; flex-shrink: 0; width: min(calc(100% - 24px), 660px); margin: 8px auto; }
+.workout-layout button, .workout-layout input, .workout-layout textarea { scroll-margin-block: 16px; }
+.coach-page { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.coach-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scroll-padding-block: 16px; }
+.coach-page .chat-composer { position: static; margin-top: 12px; flex-shrink: 0; }
+.coach-page .composer-caption { flex-shrink: 0; margin-top: 8px; }
+.workout-layout > .rest-timer { position: static; flex-shrink: 0; width: min(calc(100% - 24px), 660px); margin: 8px auto 0; }
+.set-row-tools { display: flex; flex-wrap: wrap; align-items: start; gap: 8px; }
+.set-options { flex: 1; min-width: 0; }
+.set-options summary { cursor: pointer; font-size: 12px; color: var(--muted); min-height: 44px; padding: 12px 4px; }
+.set-options[open] { flex-basis: 100%; }
+.set-options .field-hint { margin-top: 0; }
+.advanced-prescription, .advanced-set-tools { margin-block: 8px; }
+.advanced-prescription summary, .advanced-set-tools summary { cursor: pointer; min-height: 44px; padding: 12px 0; font-size: 13px; color: var(--muted); }
+.advanced-set-tools .text-button { padding-inline: 12px; }
+.save-status { color: var(--muted); font-size: 13px; margin: 8px 0 16px; }
+.save-status.danger { color: var(--danger); }
+.form-error { border: 1px solid #8e534a; border-radius: 10px; padding: 14px; margin-bottom: 16px; background: #392723; color: #ffd3c9; font-size: 14px; overflow-wrap: anywhere; }
+.form-error a { display: inline-flex; align-items: center; min-height: 44px; text-decoration: underline; }
+.form-error summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+.form-error dd { margin: 6px 0 16px; }
+[aria-invalid=true] { border-color: var(--danger); }
+.modal[open] { display: flex; flex-direction: column; }
+.modal-header, .modal-feedback { flex-shrink: 0; }
+.modal-body { min-height: 0; overflow-y: auto; }
+.toast.in-dialog { position: static; transform: none; width: auto; margin: 12px; box-shadow: none; }
+.proposal-readiness { border-left: 3px solid var(--accent); padding: 8px 12px; margin-top: 16px; font-size: 14px; }
+.proposal-readiness .text-button { margin-right: 16px; }
+.new-reply { flex-shrink: 0; background: var(--surface-raised); padding: 12px; border-radius: 8px; }
+@media (max-height: 500px) {
+  .app-header { height: calc(48px + env(safe-area-inset-top)); }
+  .bottom-nav { padding-block: 2px calc(2px + env(safe-area-inset-bottom)); }
+  .bottom-nav a { min-height: 44px; flex-direction: row; justify-content: center; }
+  .session-actions { margin-block: 4px; padding: 4px; }
+}
+
+.app-shell > .toast { position: static; transform: none; flex-shrink: 0; margin: 8px auto; box-shadow: none; }
+
+/* On phones, keep day choices and chart filters large enough to tap. */
+@media (max-width: 550px) {
+  .day-picker { grid-template-columns: repeat(4, minmax(44px, 1fr)); gap: 8px; }
+  .week-strip { grid-template-columns: repeat(7, minmax(44px, 1fr)); gap: 8px; overflow-x: auto; margin-inline: -4px; padding-bottom: 8px; }
+  .week-strip button { min-width: 44px; min-height: 76px; }
+  .chart-card .chip { min-height: 48px; min-width: 64px; }
+}
+
+/* Hide browser tracks at every screen size while retaining touch, wheel,
+   trackpad, and keyboard scrolling, including dialogs and horizontal lists. */
+:root, :root * { scrollbar-width: none; }
+:root::-webkit-scrollbar, :root *::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* Coach is a conversation workspace: quiet chrome, generous reading space. */
+.coach-page { max-width: 860px; padding-top: 16px; }
+.coach-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; }
+.coach-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.coach-heading h1 { font-size: 28px; font-weight: 650; }
+.coach-mode { font-size: 12px; color: var(--muted); }
+.coach-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.coach-chats-button { min-height: 44px; padding: 8px 12px; gap: 7px; }
+.coach-chat-title { font-size: 15px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: 8px; flex-shrink: 0; }
+.coach-info { flex-shrink: 0; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.coach-info summary { cursor: pointer; min-height: 44px; align-content: center; }
+.coach-info p { margin-bottom: 8px; max-width: 60ch; }
+.coach-info a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.coach-sync-status { font-size: 12px; color: var(--muted); padding-top: 6px; flex-shrink: 0; }
+.coach-scroll { padding: 0 3px 16px; }
+.coach-welcome { padding: 28px 0 0; }
+.coach-welcome h2 { font-size: clamp(24px, 5vw, 32px); font-weight: 600; }
+.coach-welcome > p { font-size: 15px; max-width: 48ch; margin-top: 12px; color: var(--muted); }
+.conversation-starters { gap: 0; margin-top: 24px; border-top: 1px solid var(--border); }
+.conversation-starters button { background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 17px 4px; min-height: 72px; }
+.conversation-starters button:active { background: var(--surface); }
+.conversation-starters strong { font-size: 16px; font-weight: 550; }
+.conversation-starters small { margin-top: 4px; font-size: 13px; color: var(--muted); }
+.coach-page .messages { gap: 28px; padding-top: 24px; }
+.coach-page .message.assistant { gap: 0; }
+.coach-page .message-avatar { display: none; }
+.coach-page .message-content { max-width: 100%; }
+.coach-page .message.user .message-content { max-width: 88%; }
+.coach-page .proposal-card { padding: 16px; }
+.coach-page .proposal-card ul { padding-left: 20px; line-height: 1.65; font-size: 14px; }
+.coach-page .proposal-card section + section { margin-top: 16px; }
+.coach-page .proposal-actions { flex-wrap: wrap; }
+.coach-page .proposal-actions .button { min-height: 48px; font-size: 14px; }
+.coach-page .chat-composer { box-shadow: none; align-items: flex-end; border-color: #5b694c; background: var(--surface); }
+.coach-page .chat-composer textarea { resize: none; max-height: 144px; overflow-y: auto; }
+.coach-page .composer-caption { margin-top: 8px; line-height: 1.4; }
+.coach-chat-search > span { display: flex; gap: 8px; align-items: center; }
+.coach-chat-list { display: flex; flex-direction: column; }
+.coach-chat-row { display: flex; align-items: center; gap: 4px; padding-block: 8px; border-top: 1px solid var(--border); }
+.coach-chat-row .coach-conversation-select { flex: 1; min-width: 0; max-width: none; min-height: 56px; padding: 8px; border-radius: 8px; }
+.coach-chat-row .coach-conversation-select span { font-size: 16px; width: 100%; text-align: left; }
+.coach-chat-row [aria-current] { background: var(--surface-raised); color: var(--accent); }
+.coach-chat-row .icon-button { flex-shrink: 0; }
+@media (max-width: 550px) {
+  .coach-heading { display: block; }
+  .coach-mode { display: block; margin-top: 2px; }
+  .coach-header-actions > .text-button { font-size: 13px; }
+  .coach-page .proposal-card section p { flex-direction: column; gap: 4px; }
+}
+@media (max-height: 500px) {
+  .coach-page { padding-top: 4px; padding-bottom: 4px; }
+  .coach-heading h1 { font-size: 22px; }
+  .coach-heading { display: flex; }
+  .coach-info summary { min-height: 32px; }
+  .coach-chat-title { margin-top: 0; }
+  .coach-page .composer-caption { display: none; }
+}

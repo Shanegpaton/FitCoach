@@ -4,6 +4,7 @@ import type { ServerWorkoutProposal } from '../coach';
 import { cacheApprovedWorkout, db, syncRootId } from '../db';
 import { formatLoad, type Profile, type Session } from '../domain';
 import { backendRequest } from '../chatgptVm';
+import { ProposalReadiness } from '../ui';
 
 function WorkoutSnapshot({ value, unit }: { value: Session; unit: Profile['unit'] }) {
   const load = (kg: number | null) => kg == null ? '—' : `${formatLoad(kg, unit)} ${unit}`;
@@ -82,8 +83,9 @@ export function WorkoutProposal({ proposal, userId, ready, unit, onStatus, run }
     <details open><summary>Proposed workout</summary><WorkoutSnapshot value={proposal.session} unit={unit} /></details>
     {proposal.beforeSession && <details><summary>Original workout</summary><WorkoutSnapshot value={proposal.beforeSession} unit={unit} /></details>}
     <small>{proposal.beforeSession ? 'The original snapshot stays in this proposal. ' : ''}Expires {new Date(proposal.expiresAt).toLocaleString()}.</small>
+    {proposal.status === 'pending' && <ProposalReadiness ready={ready} />}
     {proposal.status === 'pending' ? <div className="proposal-actions">
-      <button className="button primary" disabled={busy || !ready || !navigator.onLine} onClick={() => void decide(true)}>{starting ? 'Start workout' : 'Accept changes'}</button>
+      <button className="button primary" disabled={busy || !ready || !navigator.onLine} onClick={() => void decide(true)}>{busy ? 'Saving decision…' : starting ? 'Start workout' : 'Accept changes'}</button>
       <button className="button" disabled={busy || !navigator.onLine} onClick={() => void decide(false)}>Reject changes</button>
     </div> : <p role="status">{proposal.status === 'approved' ? (starting ? 'Workout started' : active ? 'Applied to active workout' : 'Applied to workout history') : `Workout edit ${proposal.status}`}</p>}
     {proposal.status === 'approved' && active && <Link className="button secondary" to={`/workout/${proposal.targetSessionId}`}>Open workout</Link>}

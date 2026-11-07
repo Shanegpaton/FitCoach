@@ -5,7 +5,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { atNoon, formatLoad, fromKg } from '../domain';
 import { completedStats, weeklyStats } from '../training';
 import { useApp } from '../state';
-import { Empty, SectionTitle } from '../ui';
+import { Empty, Modal, SectionTitle } from '../ui';
 
 export function History() {
   const { sessions, profile, exercises } = useApp();
@@ -13,6 +13,14 @@ export function History() {
   const [selected, setSelected] = useState('all');
   const [metric, setMetric] = useState('sets');
   const [range, setRange] = useState(8);
+  const [journalOpen, setJournalOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [journalLimit, setJournalLimit] = useState(20);
+  const filtered = completed.filter(session => `${session.name} ${session.date} ${session.blocks.map(block => block.name).join(' ')}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const sessionRow = (session: typeof completed[number]) => {
+    const stats = completedStats(session);
+    return <Link className="history-row" key={session.id} to={`/workout/${session.id}`}><span className="history-date"><strong>{atNoon(session.date).getDate()}</strong><small>{atNoon(session.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</small></span><div><strong>{session.name}</strong><small>{stats.sets} working sets · {session.blocks.length} exercises</small></div><ArrowUpRight size={19} /></Link>;
+  };
   const exercisedIds = new Set(completed.flatMap(s => s.blocks.filter(b => b.sets.some(set => set.done)).map(b => b.exerciseId)));
   const trackedExercises = [...exercisedIds].map(id => ({ id, name: exercises.find(e => e.id === id)?.name ?? completed.flatMap(s => s.blocks).find(b => b.exerciseId === id)?.name ?? 'Exercise' }));
   const weeks = weeklyStats(completed, range);
@@ -32,10 +40,8 @@ export function History() {
   const selectedSets = completed.flatMap(s => s.blocks.filter(b => b.exerciseId === selected).flatMap(b => b.sets)).filter(set => set.done && set.kind !== 'warmup');
   return <div className="page"><div className="page-heading"><h1>History</h1><p>Your sessions and progress.</p></div>
     {!completed.length ? <Empty title="No completed workouts yet" text="Complete a workout to see your session history, personal records, and progress over time." action="Go to Today" to="/" /> : <>
-      <SectionTitle title="Session journal"><span className="small-muted">{completed.length} sessions</span></SectionTitle><div className="list-card">{completed.map(session => {
-        const stats = completedStats(session);
-        return <Link className="history-row" key={session.id} to={`/workout/${session.id}`}><span className="history-date"><strong>{atNoon(session.date).getDate()}</strong><small>{atNoon(session.date).toLocaleDateString(undefined, { month: 'short' }).toUpperCase()}</small></span><div><strong>{session.name}</strong><small>{stats.sets} working sets · {session.blocks.length} exercises</small></div><ArrowUpRight size={19} /></Link>;
-      })}</div>
+      <SectionTitle title="Session journal"><span className="small-muted">{completed.length} sessions</span></SectionTitle><div className="list-card">{completed.slice(0, 3).map(sessionRow)}</div>
+      <button className="text-button" onClick={() => { setJournalOpen(true); setJournalLimit(20); }}>View all {completed.length} sessions</button>
       <div className="stats-grid history-stats"><div><span>Workouts</span><strong>{completed.length}<small> all time</small></strong></div><div><span>Working sets</span><strong>{totalSets}<small> all time</small></strong></div><div><span>This week</span><strong>{weekly.workouts}<small> workouts</small></strong></div></div>
       <section className="chart-card"><SectionTitle title="Training trends"><TrendingUp size={20} className="text-accent" /></SectionTitle>
         <div className="chart-filters"><label className="select-wrap"><span className="sr-only">Exercise trend</span><select aria-label="Exercise trend" value={selected} onChange={e => { setSelected(e.target.value); setMetric(e.target.value === 'all' ? 'sets' : 'weight'); }}><option value="all">All training</option>{trackedExercises.map(ex => <option key={ex.id} value={ex.id}>{ex.name}</option>)}</select><ChevronDown size={14} /></label><label className="select-wrap"><span className="sr-only">Chart range</span><select aria-label="Chart range" value={range} onChange={e => setRange(Number(e.target.value))}><option value={4}>4 weeks</option><option value={8}>8 weeks</option><option value={12}>12 weeks</option><option value={52}>1 year</option></select></label></div>
@@ -50,6 +56,7 @@ export function History() {
       {selected !== 'all' && selectedSets.length > 0 && <div className="record-card"><span className="exercise-icon"><Trophy size={22} /></span><div><span className="eyebrow">Personal benchmark</span><strong>{formatLoad(Math.max(...selectedSets.map(s => s.kg ?? 0)), profile.unit)} {profile.unit} best external load</strong><small>{Math.max(...selectedSets.map(s => s.reps ?? 0))} reps · best logged rep count</small></div></div>}
 
     </>}
+    {journalOpen && <Modal title="All sessions" onClose={() => setJournalOpen(false)}><label>Search sessions<input type="search" value={query} onChange={event => { setQuery(event.target.value); setJournalLimit(20); }} placeholder="Workout, exercise, or date" /></label><p className="field-hint" role="status">{filtered.length} matching sessions</p><div className="list-card">{filtered.slice(0, journalLimit).map(sessionRow)}</div>{!filtered.length && <p>No matching sessions. Try another workout name, exercise, or date.</p>}{filtered.length > journalLimit && <button className="button secondary" onClick={() => setJournalLimit(value => value + 20)}>Show more sessions</button>}</Modal>}
     <div className="quiet-note"><CalendarDays size={17} /><p>Progress comes from your logs. Every completed session gives you a little more to learn from.</p><Dumbbell size={18} /></div>
   </div>;
 }

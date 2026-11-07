@@ -1,14 +1,14 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link, Navigate, NavLink, Route, Routes, useLocation } from 'react-router';
-import { Activity, AlertCircle, ArrowUpRight, Check, Dumbbell, History as HistoryIcon, LayoutGrid, LogOut, Settings as SettingsIcon, Sparkles, WifiOff, X } from 'lucide-react';
+import { Activity, ArrowUpRight, Dumbbell, History as HistoryIcon, LayoutGrid, LogOut, Settings as SettingsIcon, Sparkles, WifiOff } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { ZodError } from 'zod';
 import { activateUserDatabase, db, hasLegacyData, importLegacyData, initialize } from './db';
 import { AppContext, type AppData } from './state';
 import { getSyncAccessToken, useAuth } from './auth';
 import { startSyncCoordinator, type SyncStatus } from './sync';
-import { Modal } from './ui';
+import { Modal, Notification } from './ui';
 import { errorMessage } from './errors';
 import { Today } from './pages/Today';
 import { Plans } from './pages/Plans';
@@ -63,6 +63,14 @@ export function App() {
     if (!toast || toast.error) return;
     const timeout = setTimeout(() => setToast(null), 4000); return () => clearTimeout(timeout);
   }, [toast]);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const resize = () => {
+      if (!viewport || viewport.scale === 1) document.documentElement.style.setProperty('--app-height', `${viewport?.height ?? window.innerHeight}px`);
+    };
+    resize(); viewport?.addEventListener('resize', resize); window.addEventListener('resize', resize);
+    return () => { viewport?.removeEventListener('resize', resize); window.removeEventListener('resize', resize); document.documentElement.style.removeProperty('--app-height'); };
+  }, []);
   const data = useLiveQuery(async () => {
     if (!auth.userId || readyForUser !== auth.userId) return undefined;
     const [profile, exercises, plans, sessions, overrides, messages, proposals] = await Promise.all([
@@ -77,7 +85,7 @@ export function App() {
   }, [auth.userId, readyForUser]) ?? 0;
   useEffect(() => {
     if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: 'start' });
-    else window.scrollTo(0, 0);
+    else { document.getElementById('main-content')?.scrollTo(0, 0); window.scrollTo(0, 0); }
   }, [location.pathname, location.hash, Boolean(data)]);
   const notify = (message: string, error = false) => setToast({ message, error });
   const run = async (action: () => Promise<unknown>, success?: string) => {
@@ -130,6 +138,7 @@ export function App() {
         <CoachMaintenance />
         <header className="app-header"><Link to="/" className="brand" aria-label="FitCoach home"><span className="brand-mark">f.</span><span>fitcoach<span className="brand-dot">.</span></span></Link>
           <div className="header-right"><Link className="local-badge" to="/settings" aria-label={`Synchronization: ${syncLabel}`}><span />{auth.offlineAccess ? 'Offline · saved here' : syncLabel}</Link><Link className="icon-button" to="/settings" aria-label="Settings"><SettingsIcon size={20} /></Link><button className="icon-button" aria-label="Sign out" title={auth.email ? `Sign out ${auth.email}` : 'Sign out'} onClick={() => void auth.signOut()}><LogOut size={18} /></button></div></header>
+        {toast && <Notification {...toast} onDismiss={() => setToast(null)} />}
         {!online && <div className="connection-banner"><WifiOff size={15} /> Offline. Your training stays with you.</div>}
         {syncStatus && (syncStatus.state === 'syncing' || syncStatus.state === 'error' || syncStatus.conflicts > 0 || syncStatus.pending > 0 || localPending > 0) && <Link to="/settings" className={`connection-banner sync-banner ${syncStatus.state === 'error' || syncStatus.conflicts ? 'sync-alert' : ''}`} role="status">{syncStatus.state === 'syncing' ? 'Saved on this device. Syncing…' : syncStatus.conflicts ? `${syncStatus.conflicts} sync conflict${syncStatus.conflicts === 1 ? '' : 's'} need your choice.` : syncStatus.failed ? `${syncStatus.failed} change${syncStatus.failed === 1 ? '' : 's'} failed to upload.` : syncStatus.state === 'error' ? 'Saved on this device. Sync needs attention.' : `${Math.max(syncStatus.pending, localPending)} change${Math.max(syncStatus.pending, localPending) === 1 ? '' : 's'} waiting to sync.`} <span>View</span></Link>}
         {auth.error && <div className="connection-banner" role="status">{auth.error}{online && <button onClick={() => void auth.signIn()}>Sign in again</button>}</div>}
@@ -139,7 +148,7 @@ export function App() {
           <Route path="/auth/callback" element={<Navigate to="/" replace />} />
           <Route path="/" element={<Today />} /><Route path="/plan" element={<Plans />} />
           <Route path="/coach" element={<Coach />} /><Route path="/history" element={<Suspense fallback={<div className="page"><p className="field-hint">Opening your journal…</p></div>}><History /></Suspense>} />
-          <Route path="/workout/:id" element={<WorkoutPage />} /><Route path="/settings" element={<Settings />} />
+          <Route path="/workout/:id" element={<WorkoutPage />} /><Route path="/settings" element={<Settings key={auth.userId} />} />
           <Route path="*" element={<div className="empty"><h1>Page not found</h1><Link to="/" className="button primary">Back to Today</Link></div>} />
         </Routes></main>
         {active && !location.pathname.startsWith('/workout/') && <Link className="resume-bar" to={`/workout/${active.id}`}><span className="pulse" /><div><strong>Workout in progress</strong><small>{active.name}</small></div><span>Resume<ArrowUpRight size={18} /></span></Link>}
@@ -149,7 +158,6 @@ export function App() {
             return <NavLink key={String(to)} to={String(to)} end={to === '/'} className={({ isActive }) => isActive ? 'active' : ''}><Component size={21} /><span>{String(label)}</span></NavLink>;
           })}
         </nav>
-        {toast && <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <AlertCircle size={18} aria-hidden="true" /> : <Check size={18} aria-hidden="true" />}<span>{toast.message}</span><button type="button" aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={16} aria-hidden="true" /></button></div>}
         {!data.profile.onboardingDone && <Onboarding />}
         {legacyAvailable && !migrationSeen && <Modal title="Import this device’s training data?" onClose={finishLegacyReview}><p>FitCoach found data from before sign-in was added. Import it into this Google account to keep using your existing plans, profile, and workout history.</p><p className="field-hint">The original local data is kept. Importing replaces data in this account if it already has any.</p>{legacyImportError && <p className="auth-error" role="alert">Import failed: {legacyImportError}</p>}<div className="action-row"><button className="button secondary" disabled={importingLegacy} onClick={finishLegacyReview}>Keep accounts separate</button><button className="button primary" disabled={importingLegacy} onClick={() => void importLegacy()}>{importingLegacy ? 'Importing…' : 'Import data'}</button></div></Modal>}
       </div>

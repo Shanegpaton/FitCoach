@@ -34,14 +34,21 @@ export function WorkoutPage() {
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [duration, setDuration] = useState(90);
   const [timerSetup, setTimerSetup] = useState(false);
-  const [showSetDetails, setShowSetDetails] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
+  const pendingWrites = useRef(0);
   if (!session) return <div className="page"><Empty title="Workout not found" text="This workout may not exist in the current backup." action="Back to Today" to="/" /></div>;
   const active = session.status === 'active';
   const editable = active || editing;
   const stats = completedStats(session);
   const done = session.blocks.flatMap(b => b.sets).filter(s => s.done).length;
   const total = session.blocks.reduce((n, b) => n + b.sets.length, 0);
-  const update = (fn: (session: Session) => void) => run(() => updateSession(session.id, s => { fn(s); sessionSchema.parse(s); }));
+  const update = async (fn: (session: Session) => void) => {
+    pendingWrites.current++; setSaveStatus('saving');
+    const saved = await run(() => updateSession(session.id, s => { fn(s); sessionSchema.parse(s); }));
+    pendingWrites.current--;
+    if (!saved) setSaveStatus('error'); else if (!pendingWrites.current) setSaveStatus('saved');
+    return saved;
+  };
   const toggleSet = async (bi: number, si: number) => {
     unlockAudio();
     let focus: { block: number; set: number } | null = null;
@@ -69,12 +76,14 @@ export function WorkoutPage() {
     const set = { ...newSet(kind, chain), kg: null, reps: null, effort: null, done: false };
     if (kind === 'warmup') block.sets.unshift(set); else block.sets.push(set);
   });
-  return <div className="page workout-page"><div className="workout-page-top"><Link className="text-button" to={active ? '/' : '/history'}><ArrowLeft size={17} />{active ? 'Today' : 'History'}</Link><span className="pill">{active ? <><span className="pulse" />In progress</> : <><CheckCheck size={14} />Completed</>}</span></div>
+  return <div className="workout-layout">
+    {active && session.timer && <RestTimer timer={session.timer} onChange={timer => update(s => { s.timer = timer; })} onExpire={() => notify('Rest complete. Ready for your next set.')} />}
+<div className="page workout-page"><div className="workout-page-top"><Link className="text-button" to={active ? '/' : '/history'}><ArrowLeft size={17} />{active ? 'Today' : 'History'}</Link><span className="pill">{active ? <><span className="pulse" />In progress</> : <><CheckCheck size={14} />Completed</>}</span></div>
     <div className="page-heading compact-heading"><span className="eyebrow">{atNoon(session.date).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</span><h1>{session.name}</h1><p>{session.blocks.length} exercises · {done} of {total} sets logged</p></div>
     <div className="progress-track" role="progressbar" aria-label="Workout sets completed" aria-valuenow={done} aria-valuemin={0} aria-valuemax={total}><div style={{ width: `${total ? done / total * 100 : 0}%` }} /></div>
     {!active && <div className="action-row"><button className="button secondary" onClick={() => setEditing(!editing)}>{editing ? <Check size={16} /> : <Pencil size={16} />}{editing ? 'Done editing' : 'Edit log'}</button><span className="small-muted">{stats.sets} working sets · {Math.round(Number(formatLoad(stats.volumeKg, profile.unit))).toLocaleString()} {profile.unit} volume</span></div>}
-    <p className="field-hint">{active ? 'Enter your actual weight and reps, then check off each set. Changes save on this device.' : 'A snapshot of the workout you completed.'}</p>
-    {active && session.timer && <RestTimer timer={session.timer} onChange={timer => update(s => { s.timer = timer; })} onExpire={() => notify('Rest complete. Ready for your next set.')} />}
+    <p className="field-hint">{active ? 'Enter actual weight and reps, then check off each set.' : editing ? 'Changes save as you edit. Done editing returns to the read-only log.' : 'A snapshot of the workout you completed.'}</p>
+    {editable && <p className={`save-status ${saveStatus === 'error' ? 'danger' : ''}`} role="status">{saveStatus === 'saving' ? 'Saving on this device…' : saveStatus === 'error' ? 'A change could not be saved. Check the error and retry.' : 'Saved on this device'}</p>}
     <div className="logging-blocks">{session.blocks.map((block, bi) => {
       const previous = lastPerformance(sessions.filter(s => s.id !== session.id), block.exerciseId);
       const expandedHere = expanded === bi;
@@ -86,13 +95,17 @@ export function WorkoutPage() {
             working.forEach((set, i) => { const last = previous[i]; if (last && !set.done) { set.kg = last.kg; set.reps = last.reps; } });
           })}>Use previous</button>}</div>
           <div className="log-table-heading"><span>Set</span><span>Weight ({profile.unit})</span><span>Reps</span><span className="sr-only">Complete</span></div>
-          {block.sets.map((set, si) => <SetRow key={set.id} set={set} index={si} blockName={block.name} unit={profile.unit} bodyweight={block.loadMode === 'bodyweight'} editable={editable} showDetails={showSetDetails}
+          {block.sets.map((set, si) => <SetRow key={set.id} set={set} index={si} blockName={block.name} unit={profile.unit} bodyweight={block.loadMode === 'bodyweight'} editable={editable}
             onCommit={(field, value) => update(s => {
               const changed = s.blocks[bi].sets[si]; changed[field] = value;
               if ((field === 'reps' && value === null) || (field === 'kg' && value === null && block.loadMode === 'external')) changed.done = false;
-            })} onToggle={() => toggleSet(bi, si)} onRemove={() => update(s => { s.blocks[bi].sets.splice(si, 1); })} canRemove={block.sets.length > 1} />)}
-          <button className="text-button set-details-toggle" aria-expanded={showSetDetails} onClick={() => setShowSetDetails(!showSetDetails)}>Effort & set options<ChevronDown size={16} /></button>
-          {showSetDetails && <p className="field-hint">RPE is optional effort from 1 to 10. A 10 means you could not do another rep.</p>}
+            })} onToggle={() => toggleSet(bi, si)} onRemove={() => update(s => { s.blocks[bi].sets.splice(si, 1); })} canRemove={block.sets.length > 1}
+            canRepeat={editable && !set.done && set.kg === null && set.reps === null && block.sets.slice(0, si).some(previous => previous.done && (set.kind === 'warmup' ? previous.kind === 'warmup' : previous.kind !== 'warmup'))}
+            onRepeat={() => update(s => {
+              const target = s.blocks[bi].sets[si];
+              const previous = s.blocks[bi].sets.slice(0, si).reverse().find(item => item.done && (target.kind === 'warmup' ? item.kind === 'warmup' : item.kind !== 'warmup'));
+              if (previous && !target.done && target.kg === null && target.reps === null) { target.kg = previous.kg; target.reps = previous.reps; }
+            })} />)}
           {editable && <><div className="set-add-actions"><button className="text-button" onClick={() => addSet(bi, 'working')}><Plus size={15} />Set</button><button className="text-button" onClick={() => addSet(bi, 'warmup')}>Warm-up</button><button className="text-button" onClick={() => addSet(bi, 'drop')}>Drop set</button><button className="text-button" onClick={() => setSubstitute(bi)}>Substitute</button></div>
             <label className="notes-label">Exercise notes<textarea placeholder="How did it feel?" defaultValue={block.notes} key={`${block.id}-notes`} rows={2} onBlur={e => update(s => { s.blocks[bi].notes = e.target.value; })} /></label>
             <label className="inline-field">Rest (seconds)<input aria-label={`Rest seconds for ${block.name}`} type="number" inputMode="numeric" min={0} max={1800} defaultValue={block.restSeconds} onBlur={e => update(s => { s.blocks[bi].restSeconds = Number(e.target.value); })} /></label>
@@ -102,7 +115,7 @@ export function WorkoutPage() {
     })}</div>
     {editable && <button className="button dashed" onClick={() => setSubstitute('new')}><Plus size={18} />Add exercise to this session</button>}
     {editable ? <label className="notes-label session-notes">Workout notes<textarea key={`${session.id}-session-notes`} defaultValue={session.notes} rows={2} placeholder="A little context for next time." onBlur={e => update(s => { s.notes = e.target.value; })} /></label> : session.notes && <p className="card-note">{session.notes}</p>}
-    {active && <><div className="session-actions"><button className="button secondary" onClick={() => { unlockAudio(); setTimerSetup(true); }}><Clock3 size={18} />Rest timer</button><button className="button primary" onClick={() => setConfirmFinish(true)}>Finish workout<CheckCheck size={18} /></button></div><button className="text-button danger" onClick={async () => {
+    {active && <><button className="text-button danger" onClick={async () => {
       if (window.confirm('Discard this unfinished workout and its logged sets?')) if (await run(() => deleteLocalChange('sessions', session.id, db.sessions))) navigate('/');
     }}><Trash2 size={15} />Discard session</button></>}
     {timerSetup && <Modal title="Rest timer" onClose={() => setTimerSetup(false)}><label>Duration (seconds)<input type="number" inputMode="numeric" min={1} max={1800} value={duration} onChange={e => setDuration(Number(e.target.value))} /></label><div className="chip-row">{[60, 90, 120, 180].map(seconds => <button className={`chip ${duration === seconds ? 'selected' : ''}`} key={seconds} onClick={() => setDuration(seconds)}>{seconds}s</button>)}</div><p className="field-hint">The timer resumes accurately when you return. Sound and vibration work while the app is open; locked-screen alerts depend on your browser.</p><button className="button primary" onClick={async () => { if (duration < 1 || duration > 1800) return; if (await update(s => { s.timer = { duration, remaining: duration, endAt: Date.now() + duration * 1000 }; })) setTimerSetup(false); }}><Play size={18} />Start timer</button></Modal>}
@@ -121,11 +134,13 @@ export function WorkoutPage() {
       });
       if (saved) { setSubstitute(null); if (substitute === 'new') setExpanded(session.blocks.length); }
     }} />}
+  </div>
+    {active && <div className="session-actions"><button className="button secondary" onClick={() => { unlockAudio(); setTimerSetup(true); }}><Clock3 size={18} />Rest timer</button><button className="button primary" onClick={() => setConfirmFinish(true)}>Finish workout<CheckCheck size={18} /></button></div>}
   </div>;
 }
 
-function SetRow({ set, index, blockName, unit, bodyweight, editable, onCommit, onToggle, onRemove, canRemove, showDetails }: {
-  set: LoggedSet; index: number; blockName: string; unit: Profile['unit']; bodyweight: boolean; editable: boolean; showDetails: boolean;
+function SetRow({ set, index, blockName, unit, bodyweight, editable, onCommit, onToggle, onRemove, canRemove, canRepeat, onRepeat }: {
+  set: LoggedSet; index: number; blockName: string; unit: Profile['unit']; bodyweight: boolean; editable: boolean; canRepeat: boolean; onRepeat: () => Promise<boolean>;
   onCommit: (field: 'kg' | 'reps' | 'effort', value: number | null) => Promise<boolean>;
   onToggle: () => Promise<void>; onRemove: () => Promise<boolean>; canRemove: boolean;
 }) {
@@ -156,9 +171,11 @@ function SetRow({ set, index, blockName, unit, bodyweight, editable, onCommit, o
 
     <button className={`set-check ${set.done ? 'checked' : ''}`} aria-label={`${set.done ? 'Uncomplete' : 'Complete'} set ${index + 1} ${blockName}`} aria-pressed={set.done} disabled={!editable} onClick={onToggle}><Check size={19} /></button>
     </div>
-    {showDetails && <div className="set-details"><label>Effort (RPE, optional)
+    <div className="set-row-tools">
+    {canRepeat && <button className="text-button" aria-label={`Repeat last set into set ${index + 1} ${blockName}`} onClick={() => void onRepeat()}>Repeat last set</button>}
+    <details className="set-options"><summary aria-label={`Set ${index + 1} options for ${blockName}`}>Effort & options</summary><div className="set-details"><label>Effort (RPE, optional)
     <input aria-label={`RPE set ${index + 1} ${blockName}`} type="number" inputMode="decimal" min={1} max={10} step="0.5" disabled={!editable} value={effort} placeholder="—" onChange={e => setEffort(e.target.value)} onBlur={() => commit('effort', effort)} />
-    </label>{editable && canRemove && <button className="text-button danger" aria-label={`Delete set ${index + 1} ${blockName}`} onClick={() => { if (!set.done || window.confirm('Remove this completed set?')) void onRemove(); }}><Minus size={16} />Remove set {index + 1}</button>}</div>}
+    </label>{editable && canRemove && <button className="text-button danger" aria-label={`Delete set ${index + 1} ${blockName}`} onClick={() => { if (!set.done || window.confirm('Remove this completed set?')) void onRemove(); }}><Minus size={16} />Remove set {index + 1}</button>}</div><p className="field-hint">RPE is effort from 1 to 10. A 10 means you could not do another rep.</p></details></div>
 
   </div>;
 }
