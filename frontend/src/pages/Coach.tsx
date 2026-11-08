@@ -3,7 +3,7 @@ import { CoachContextStatus } from '../coachContext';
 import Markdown from 'react-markdown';
 import { Link } from 'react-router';
 import remarkGfm from 'remark-gfm';
-import { ArrowRight, Check, MessageCircle, Plus, Send, Sparkles, X, Pencil, Trash2, ChevronDown, Search } from 'lucide-react';
+import { ArrowRight, Check, MessageCircle, Plus, Send, Sparkles, X, Pencil, Trash2, ArrowLeft, Settings as SettingsIcon, Search } from 'lucide-react';
 import { db, applyProposal, cacheApprovedProposal, enqueueChange, putLocalChange, syncRootId } from '../db';
 import { assistantMessage, sampleCoach, isWorkoutProposal } from '../coach';
 import { BackendError, backendChatGPTRequest, backendRequest, liveCoach, type ChatGPTConnection } from '../chatgptVm';
@@ -470,9 +470,9 @@ export function useCoach() {
   return context;
 }
 
-export function Coach() {
+export function Coach({ syncLabel }: { syncLabel: string }) {
   const { userId, session } = useAuth();
-  const { profile, plans, exercises, trainingDataReady, run } = useApp();
+  const { profile, plans, exercises, sessions, trainingDataReady, run } = useApp();
   const {
     mode,
     messages,
@@ -502,6 +502,7 @@ export function Coach() {
   const [deletingChat, setDeletingChat] = useState<{ id: string; title: string } | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const activeWorkout = sessions.filter(item => item.status === 'active').sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
   const activeChat = conversations.find(item => item.id === activeConversationId);
   const blocked = sending || (recovery !== null && recovery !== 'failed') || mode === 'checking' || (mode === 'chatgpt' && !activeConversationId);
   useEffect(() => {
@@ -533,28 +534,23 @@ export function Coach() {
   return (
     <div className="page coach-page">
       <header className="coach-header">
-        <div className="coach-heading"><h1>Coach</h1><span className="coach-mode">{mode === 'chatgpt' ? 'ChatGPT Coach' : mode === 'checking' ? 'Connecting…' : 'Sample Coach'}</span></div>
+        <Link to="/" className="icon-button" aria-label="Today" title="Back to Today"><ArrowLeft size={21} /></Link>
+        <h1 className="coach-toolbar-title" title={activeChat?.title}>{mode === 'chatgpt' ? activeChat?.title ?? 'Coach' : mode === 'checking' ? 'Connecting…' : 'Coach'}</h1>
         <div className="coach-header-actions">
-          {mode === 'chatgpt' ? <>
-            <button className="button secondary coach-chats-button" onClick={() => { setChatSearch(''); setChatsOpen(true); }}><MessageCircle size={18} /><span>Chats</span><ChevronDown size={15} /></button>
+          {mode === 'chatgpt' && <>
+            <button className="icon-button" aria-label="Chats" title="Your conversations" onClick={() => { setChatSearch(''); setChatsOpen(true); }}><MessageCircle size={20} /></button>
             <button className="icon-button" aria-label="New conversation" title="New conversation" disabled={blocked || !userId || !navigator.onLine || chatBusy} onClick={async () => { setChatBusy(true); try { await createConversation(); } finally { setChatBusy(false); } }}><Plus size={21} /></button>
-          </> : mode === 'sample' ? <Link to="/settings#coach-connection" className="text-button">Connect ChatGPT</Link> : null}
+          </>}
+          <Link to="/settings#coach-connection" className="icon-button coach-sync-link" aria-label={`Settings. Synchronization: ${syncLabel}`} title={`Settings · ${syncLabel}`}><SettingsIcon size={20} /><span className={syncLabel === 'Synced' ? 'sync-dot synced' : 'sync-dot'} /></Link>
         </div>
       </header>
-      {mode === 'chatgpt' && <p className="coach-chat-title">{activeChat?.title ?? 'Opening conversation…'}</p>}
-      <details className="coach-info">
-        <summary>{mode === 'chatgpt' ? 'Saved to your account' : mode === 'checking' ? 'Checking your ChatGPT connection…' : 'Sample responses · saved on this device'}</summary>
-        <p>{mode === 'chatgpt' ? 'Using your connected ChatGPT plan. Conversations are saved to your account.' : 'Sample responses are available offline or without ChatGPT plan permission. These are examples, not live AI replies.'}</p>
-        <Link to="/settings#coach-connection">{mode === 'chatgpt' ? 'Manage connection' : 'Connect ChatGPT for online coaching'}</Link>
-      </details>
-      {mode === 'chatgpt' && <p className="coach-sync-status" role="status">{trainingDataReady ? 'Your synced training data is available to Coach.' : 'Training data is syncing. You can ask general questions.'}</p>}
       <div className="coach-scroll" ref={scrollPane}>
     {mode === 'chatgpt' && <CoachContextStatus key={`${userId}:${activeConversationId}`} conversationId={activeConversationId} sending={sending} />}
 
       {messages.length === 0 && (
         <div className="coach-welcome">
           <h2>What would help today?</h2>
-          <p>{mode === 'chatgpt' ? 'Talk through your training, adjust your plan, or review a workout.' : 'Try a sample conversation, or connect ChatGPT for online coaching.'}</p>
+          <p>{mode === 'chatgpt' ? 'Talk through your training, adjust your plan, or review a workout.' : <>These are sample replies. <Link to="/settings#coach-connection">Connect ChatGPT</Link> for online coaching.</>}</p>
           <div className="conversation-starters">
             {(mode === 'chatgpt'
               ? [['How should I start training?', 'Get practical first steps'], ['Explain my plan', 'Understand your routine'], ['How should I recover?', 'Talk through rest and recovery']]
@@ -705,6 +701,7 @@ export function Coach() {
       )}
 
       </div>
+      {activeWorkout && <Link className="coach-resume" to={`/workout/${activeWorkout.id}`}>Resume {activeWorkout.name}<ArrowRight size={16} /></Link>}
       {unreadReply && <button className="text-button new-reply" onClick={() => { following.current = true; setUnreadReply(false); bottom.current?.scrollIntoView({ block: 'end' }); }}>Go to latest reply</button>}
       <form className="chat-composer" onSubmit={e => { e.preventDefault(); void send(); }}>
         <label className="sr-only" htmlFor="chat-input">Message Coach</label>
@@ -732,11 +729,6 @@ export function Coach() {
           <Send size={18} />
         </button>
       </form>
-
-      <p className="composer-caption">
-        <MessageCircle size={12} />
-        {sending ? 'Preparing a reply…' : 'Enter adds a new line. Use Send when you’re ready.'}
-      </p>
 
       {chatsOpen && <Modal title="Your conversations" onClose={() => setChatsOpen(false)}>
         <label className="coach-chat-search"><span><Search size={16} />Find a conversation</span><input type="search" value={chatSearch} onChange={e => setChatSearch(e.target.value)} placeholder="Search by title" /></label>

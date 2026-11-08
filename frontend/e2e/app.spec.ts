@@ -78,18 +78,28 @@ async function openApp(page: Page) {
   await expect(page.getByRole('dialog')).toHaveCount(0);
 }
 
+async function openMainPage(page: Page, name: 'Plan' | 'History') {
+  if (new URL(page.url()).pathname === '/coach' || new URL(page.url()).pathname.startsWith('/workout/')) await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('link', { name, exact: true }).click();
+}
+
+async function openCoach(page: Page) {
+  if (new URL(page.url()).pathname.startsWith('/workout/')) await page.getByRole('link', { name: 'Today', exact: true }).click();
+  if (new URL(page.url()).pathname !== '/coach') await page.getByRole('link', { name: 'Coach', exact: true }).click();
+}
+
 async function waitForCoachSync(page: Page) {
   // Onboarding can finish while bootstrap is running. A foreground event asks
   // the coordinator to upload that local change once the current pass finishes.
   await expect.poll(async () => {
-    if (await page.getByText(/Your synced training data is available to Coach/).isVisible()) return true;
+    if (await page.getByRole('link', { name: 'Settings. Synchronization: Synced', exact: true }).isVisible()) return true;
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     return false;
   }).toBe(true);
 }
 
 async function makePlan(page: Page) {
-  await page.getByRole('link', { name: 'Plan', exact: true }).click();
+  await openMainPage(page, 'Plan');
   await page.getByRole('button', { name: 'New plan', exact: true }).click();
   await page.getByLabel('Plan name', { exact: true }).fill('My strength plan');
   await page.getByLabel('Workout name', { exact: true }).fill('Strength A');
@@ -117,7 +127,7 @@ test('empty history, onboarding editing, responsive layout and navigation', asyn
   await page.getByLabel('What are you working toward?').fill('Build strength and train consistently');
   await page.getByRole('button', { name: 'Let’s get started' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.getByRole('link', { name: 'History', exact: true }).click();
+  await openMainPage(page, 'History');
   await expect(page.getByText('No completed workouts yet')).toBeVisible();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page.getByLabel('What are you working toward?')).toHaveValue('Build strength and train consistently');
@@ -163,15 +173,16 @@ test('manual plan, advanced set tools, offline logging, reload recovery and real
 });
 
 test('sample Coach proposal is editable and only saved after Apply', async ({ page }, info) => {
-  await openApp(page); await page.getByRole('link', { name: 'Coach', exact: true }).click();
-  await expect(page.getByText('Sample Coach', { exact: true })).toBeVisible();
+  await openApp(page); await openCoach(page);
+  await expect(page.getByRole('heading', { name: 'Coach', exact: true })).toBeVisible();
   await page.getByRole('button', { name: /Build a sample plan/ }).click();
   await page.getByRole('button', { name: 'Review & edit', exact: true }).click();
   await page.getByLabel('Plan name', { exact: true }).fill('Reviewed routine');
   await page.getByRole('button', { name: 'Apply reviewed plan', exact: true }).click();
   await expect(page.getByText('Applied to your plan')).toBeVisible();
   await page.screenshot({ path: info.outputPath('coach.png'), fullPage: true });
-  await page.getByRole('link', { name: 'Plan', exact: true }).click();
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await openMainPage(page, 'Plan');
   await expect(page.getByRole('heading', { name: 'Reviewed routine', exact: true })).toBeVisible();
 });
 
@@ -198,8 +209,8 @@ test('connected Coach sends through the API and labels the saved reply', async (
     return route.fulfill({ json: { connected: true, planUsageGranted: true, storedInBackend: true }, headers });
   });
   await openApp(page);
-  await page.getByRole('link', { name: 'Coach', exact: true }).click();
-  await expect(page.getByText('ChatGPT Coach', { exact: true })).toBeVisible();
+  await openCoach(page);
+  await expect(page.getByRole('button', { name: 'Chats', exact: true })).toBeVisible();
   await page.getByLabel('Message Coach').fill('How should I begin?');
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.getByText('Start with two training days.')).toBeVisible();
@@ -212,7 +223,7 @@ test('connected Coach sends through the API and labels the saved reply', async (
   expect(calls[0]).toHaveProperty('localDate', expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
   expect(calls[0]).not.toHaveProperty('context');
   await page.reload();
-  await page.getByRole('link', { name: 'Coach', exact: true }).click();
+  await openCoach(page);
   await expect(page.getByText('Start with two training days.')).toBeVisible();
   await page.getByRole('button', { name: 'New conversation' }).click();
   await expect(page.getByRole('heading', { name: 'What would help today?', exact: true })).toBeVisible();
@@ -260,8 +271,8 @@ test('live Coach renders a durable structured proposal and requires sync before 
         'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } });
   });
   await openApp(page);
-  await page.getByRole('link', { name: 'Coach', exact: true }).click();
-  await expect(page.getByText('ChatGPT Coach', { exact: true })).toBeVisible();
+  await openCoach(page);
+  await expect(page.getByRole('button', { name: 'Chats', exact: true })).toBeVisible();
   await page.getByLabel('Message Coach').fill('Build me an upper lower plan.');
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.getByText('NEW PLAN PROPOSAL')).toBeVisible();
@@ -316,8 +327,8 @@ test('live Coach approval commits through the API and refreshes the local plan c
         'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' } });
   });
   await openApp(page);
-  await page.getByRole('link', { name: 'Coach', exact: true }).click();
-  await expect(page.getByText('ChatGPT Coach', { exact: true })).toBeVisible();
+  await openCoach(page);
+  await expect(page.getByRole('button', { name: 'Chats', exact: true })).toBeVisible();
   await waitForCoachSync(page);
   await page.getByLabel('Message Coach').fill('Build a strength plan.');
   await page.getByRole('button', { name: 'Send message' }).click();
@@ -326,13 +337,13 @@ test('live Coach approval commits through the API and refreshes the local plan c
   await approve.click();
   await expect(page.getByText('Applied to your plan')).toBeVisible();
   expect(approved).toBe(true);
-  await page.getByRole('link', { name: 'Plan', exact: true }).click();
+  await openMainPage(page, 'Plan');
   await expect(page.getByRole('heading', { name: 'Upper day', exact: true })).toBeVisible();
 });
 
 test('custom exercise, superset flow and durable rest timer', async ({ page }) => {
   await openApp(page); await makePlan(page);
-  await page.getByRole('link', { name: 'Plan', exact: true }).click();
+  await openMainPage(page, 'Plan');
   await page.getByRole('button', { name: 'Edit plan', exact: true }).click();
   await page.getByRole('button', { name: 'Add exercise', exact: true }).click();
   await page.getByRole('button', { name: 'Create custom exercise', exact: true }).click();
@@ -374,7 +385,7 @@ test('backup export/import round trip and invalid import preserves plans', async
   await expect(page.getByRole('dialog', { name: 'Replace local data?' })).toBeVisible();
   await page.getByRole('button', { name: 'Replace & import', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.getByRole('link', { name: 'Plan', exact: true }).click();
+  await openMainPage(page, 'Plan');
   await expect(page.getByRole('heading', { name: 'My strength plan', exact: true })).toBeVisible();
 });
 
@@ -501,8 +512,8 @@ test.describe('Coach interrupted requests', () => {
       return route.fulfill({ json: { text: 'Recovered safely.', messageId: 'recovered-assistant', userMessageId: 'recovered-user' }, headers });
     });
     await openApp(page);
-    await page.getByRole('link', { name: 'Coach', exact: true }).click();
-    await expect(page.getByText('ChatGPT Coach', { exact: true })).toBeVisible();
+    await openCoach(page);
+    await expect(page.getByRole('button', { name: 'Chats', exact: true })).toBeVisible();
     await page.getByLabel('Message Coach').fill('Keep my question');
     await page.getByRole('button', { name: 'Send message' }).click();
     await expect(page.getByText(/Coach is still processing your saved message/)).toBeVisible();
@@ -539,8 +550,8 @@ test.describe('Coach interrupted requests', () => {
       return route.fulfill({ status: 503, json: { detail: 'Response lost' }, headers });
     });
     await openApp(page);
-    await page.getByRole('link', { name: 'Coach', exact: true }).click();
-    await expect(page.getByText('ChatGPT Coach', { exact: true })).toBeVisible();
+    await openCoach(page);
+    await expect(page.getByRole('button', { name: 'Chats', exact: true })).toBeVisible();
     await page.getByLabel('Message Coach').fill('Answer once');
     await page.getByRole('button', { name: 'Send message' }).click();
     await expect(page.getByText('Already saved on the server.')).toBeVisible();
@@ -613,7 +624,7 @@ for (const decision of ['accept', 'reject', 'stale'] as const) {
       return route.fulfill({ headers, json: { ...proposal, status: approved ? 'approved' : rejected ? 'rejected' : stale ? 'invalidated' : 'pending' } });
     });
     await openApp(page);
-    await page.getByRole('link', { name: 'Coach', exact: true }).click();
+    await openCoach(page);
     await waitForCoachSync(page);
     await page.getByLabel('Message Coach').fill('Change my last squat set to 5 reps.');
     await page.getByRole('button', { name: 'Send message' }).click();
@@ -638,7 +649,7 @@ for (const decision of ['accept', 'reject', 'stale'] as const) {
     }
     expect(stored.blocks[0].sets[0].reps).toBe(decision === 'accept' ? 5 : 8);
     if (decision === 'accept') {
-      await page.getByRole('link', { name: 'History', exact: true }).click();
+      await openMainPage(page, 'History');
       await expect(page.getByRole('heading', { name: 'Session journal', exact: true })).toBeVisible();
       await expect(page.getByText('Recorded squat workout', { exact: true })).toBeVisible();
     }
@@ -708,7 +719,7 @@ test.describe('Coach active workout tools', () => {
         return route.fulfill({ headers, json: { ...proposal, status: approved ? 'approved' : invalidated ? 'invalidated' : 'pending' } });
       });
       await openApp(page);
-      await page.getByRole('link', { name: 'Coach', exact: true }).click();
+      await openCoach(page);
       await waitForCoachSync(page);
       await page.getByLabel('Message Coach').fill(operation === 'start' ? 'Start workout A.' : 'Add a set of five to my current workout.');
       await page.getByRole('button', { name: 'Send message' }).click();
@@ -747,7 +758,7 @@ test.describe('Coach context and account memory', () => {
     await context.route('https://api.example.com/v1/coach/conversations/*/context', route => route.fulfill({ headers,
       json: { enabled: true, summaryAvailable: true, summary: 'Earlier decision: train two days each week.', maintenancePending: false, compactionWaiting: false } }));
     await openApp(page);
-    await page.getByRole('link', { name: 'Coach', exact: true }).click();
+    await openCoach(page);
     await expect(page.getByText('Using earlier-chat summary.')).toBeVisible();
     await page.getByText('View earlier-chat summary', { exact: true }).click();
     await expect(page.getByText('Earlier decision: train two days each week.')).toBeVisible();
@@ -800,6 +811,10 @@ test('phone task hierarchy keeps workout actions reachable and optional set tool
   expect(startBox).not.toBeNull(); expect(navBox).not.toBeNull();
   expect(startBox!.y + startBox!.height).toBeLessThan(navBox!.y);
   await start.click();
+  await expect(navigation).toHaveCount(0);
+  await expect(page.locator('.app-header')).toHaveCount(0);
+  await expectUsable(page, page.getByRole('link', { name: 'Today', exact: true }));
+  await expectUsable(page, page.locator('.workout-sync-link'));
   await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toBeHidden();
   await page.getByLabel('Set 1 options for Barbell squat', { exact: true }).click();
   await page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true }).fill('8');
@@ -813,6 +828,8 @@ test('phone task hierarchy keeps workout actions reachable and optional set tool
   await page.getByRole('button', { name: 'Finish workout', exact: true }).click();
   await page.getByRole('button', { name: 'Save completed workout', exact: true }).click();
   await page.getByRole('link', { name: /Strength A/ }).click();
+  await expect(navigation).toBeVisible();
+  await expect(page.locator('.app-header')).toBeVisible();
   await page.getByLabel('Set 1 options for Barbell squat', { exact: true }).click();
   await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toHaveValue('8');
   await expect(page.getByRole('spinbutton', { name: 'RPE set 1 Barbell squat', exact: true })).toBeDisabled();
@@ -821,7 +838,7 @@ test('phone task hierarchy keeps workout actions reachable and optional set tool
 test('plan editor keeps Save reachable and protects unsaved changes', async ({ page }) => {
   await openApp(page);
   await makePlan(page);
-  await page.getByRole('link', { name: 'Plan', exact: true }).click();
+  await openMainPage(page, 'Plan');
   await page.getByRole('button', { name: 'Edit plan', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Plan editor', exact: true });
   await dialog.getByLabel('Plan name', { exact: true }).fill('Unsaved plan title');
@@ -852,7 +869,7 @@ async function expectUsable(page: Page, control: import('@playwright/test').Loca
 
 test('modal validation stays visible and weekday reassignment requires a choice', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('link', { name: 'Plan', exact: true }).click();
+  await openMainPage(page, 'Plan');
   await page.getByRole('button', { name: 'New plan', exact: true }).click();
   const editor = page.getByRole('dialog', { name: 'Plan editor', exact: true });
   await editor.getByLabel('Plan name', { exact: true }).fill('');
@@ -923,6 +940,12 @@ test('workout and Coach controls stay unobscured, and repeat set requires confir
     await page.setViewportSize(size);
     await expectUsable(page, page.getByRole('spinbutton', { name: 'Reps set 3 Barbell squat', exact: true }));
     await expectUsable(page, page.getByRole('button', { name: 'Finish workout', exact: true }));
+    const back = page.getByRole('link', { name: 'Today', exact: true });
+    const before = await back.boundingBox();
+    await page.locator('.workout-page').evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await expectUsable(page, back);
+    expect((await back.boundingBox())!.y).toBeCloseTo(before!.y, 0);
+    await expectUsable(page, page.getByRole('button', { name: 'Finish workout', exact: true }));
   }
   await page.setViewportSize({ width: 390, height: 844 });
   await logSet(page, 1, '100', '8');
@@ -933,7 +956,7 @@ test('workout and Coach controls stay unobscured, and repeat set requires confir
   await expect(page.getByRole('spinbutton', { name: 'Reps set 2 Barbell squat', exact: true })).toHaveValue('8');
   await expect(page.getByRole('button', { name: 'Complete set 2 Barbell squat', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await page.reload(); await expect(weight).toHaveValue('100');
-  await page.getByRole('link', { name: 'Coach', exact: true }).click();
+  await openCoach(page);
   await expectUsable(page, page.getByRole('button', { name: /Change my rest periods/ }));
   const input = page.getByLabel('Message Coach');
   await input.fill('First line'); await input.press('Enter'); await input.pressSequentially('Second line');
@@ -947,20 +970,24 @@ test('workout and Coach controls stay unobscured, and repeat set requires confir
     await page.setViewportSize(size);
     await expectUsable(page, input);
     await expectUsable(page, page.getByRole('button', { name: 'Send message' }));
-    await expectUsable(page, page.getByRole('link', { name: 'Connect ChatGPT', exact: true }));
+    await expectUsable(page, page.getByRole('link', { name: 'Today', exact: true }));
+    await expectUsable(page, page.locator('.coach-sync-link'));
+    await expect(page.getByRole('navigation', { name: 'Main navigation' })).toHaveCount(0);
+    const pane = await page.locator('.coach-scroll').boundingBox();
+    expect(pane!.height).toBeGreaterThan(size.height * .4);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
   await page.setViewportSize({ width: 390, height: 844 });
   const composer = await page.locator('.chat-composer').boundingBox();
-  const resume = await page.locator('.resume-bar').boundingBox();
-  expect(composer!.y + composer!.height).toBeLessThanOrEqual(resume!.y);
+  const resume = await page.locator('.coach-resume').boundingBox();
+  expect(resume!.y + resume!.height).toBeLessThanOrEqual(composer!.y);
 });
 
 test('selecting another workout explains the active session instead of redirecting', async ({ page }) => {
   await openApp(page); await makePlan(page);
   await page.getByRole('button', { name: 'Start workout', exact: true }).click();
   await logSet(page, 1, '100', '8');
-  await page.getByRole('link', { name: 'Plan', exact: true }).click();
+  await openMainPage(page, 'Plan');
   await page.getByRole('button', { name: 'Edit plan', exact: true }).click();
   await page.getByRole('button', { name: 'Add workout', exact: true }).click();
   await page.getByLabel('Workout name', { exact: true }).fill('Strength B');
@@ -1041,4 +1068,170 @@ test('phone day choices preserve touch targets without horizontal page overflow'
     const box = await day.boundingBox(); expect(box!.width).toBeGreaterThanOrEqual(44); expect(box!.height).toBeGreaterThanOrEqual(44);
   }
   expect(await page.locator('#main-content').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
+async function readPlans(page: Page) {
+  return page.evaluate(async () => new Promise<string>((resolve, reject) => {
+    const request = indexedDB.open('fitcoach-user-e2e-user');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const transaction = database.transaction('plans', 'readonly');
+      const read = transaction.objectStore('plans').getAll();
+      transaction.oncomplete = () => { database.close(); resolve(JSON.stringify(read.result)); };
+      transaction.onerror = () => { database.close(); reject(transaction.error); };
+    };
+  }));
+}
+
+test('workout choice starts Upper offline out of rotation and offers another session', async ({ page, context }) => {
+  await openApp(page); await makePlan(page);
+  await openMainPage(page, 'Plan');
+  await page.getByRole('button', { name: 'Edit plan', exact: true }).click();
+  await page.getByLabel('Workout name', { exact: true }).fill('Push');
+  for (const name of ['Pull', 'Upper']) {
+    await page.getByRole('button', { name: 'Duplicate workout', exact: true }).click();
+    await page.getByLabel('Workout name', { exact: true }).fill(name);
+  }
+  await page.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Push', exact: true })).toBeVisible();
+  const before = await readPlans(page);
+  await context.setOffline(true);
+  const library = page.getByRole('region', { name: 'Your routines', exact: true });
+  await expectUsable(page, library.getByRole('button', { name: 'Start Upper from My strength plan', exact: true }));
+  await library.getByRole('button', { name: 'Start Upper from My strength plan', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Upper', exact: true })).toBeVisible();
+  await logSet(page, 1, '80', '8');
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Upper', exact: true })).toBeVisible();
+  await expect(page.getByRole('spinbutton', { name: 'Weight set 1 Barbell squat', exact: true })).toHaveValue('80');
+  await page.getByRole('button', { name: 'Finish workout', exact: true }).click();
+  await page.getByRole('button', { name: 'Save completed workout', exact: true }).click();
+  expect(await readPlans(page)).toBe(before);
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('button', { name: 'Start another session', exact: true }).click();
+  await page.getByRole('button', { name: 'Start Pull from My strength plan', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Pull', exact: true })).toBeVisible();
+  await context.setOffline(false);
+});
+
+test('workout choice starts an unscheduled workout on a rest day without rescheduling', async ({ page }) => {
+  await openApp(page); await makePlan(page);
+  await openMainPage(page, 'Plan');
+  await page.getByRole('button', { name: 'Edit plan', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Schedule', exact: true }).selectOption('week');
+  await page.getByLabel('Workout name', { exact: true }).fill('Push');
+  await page.getByRole('button', { name: 'Duplicate workout', exact: true }).click();
+  await page.getByLabel('Workout name', { exact: true }).fill('Upper');
+  await page.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.locator('.week-strip').getByRole('button', { name: /^Sunday/ }).click();
+  await expect(page.locator('.rest-card').getByRole('heading', { name: 'Choose what you want to train', exact: true })).toBeVisible();
+  const before = await readPlans(page);
+  await page.getByRole('button', { name: 'Start Upper from My strength plan', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Upper', exact: true })).toBeVisible();
+  await logSet(page, 1, '80', '8');
+  await page.getByRole('button', { name: 'Finish workout', exact: true }).click();
+  await page.getByRole('button', { name: 'Save completed workout', exact: true }).click();
+  expect(await readPlans(page)).toBe(before);
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.locator('.week-strip').getByRole('button', { name: /^Sunday/ }).click();
+  await expect(page.getByRole('heading', { name: 'Upper', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Start another session', exact: true }).click();
+  await expectUsable(page, page.getByRole('button', { name: 'Start Push from My strength plan', exact: true }));
+});
+
+test('Today lists current-plan routines first and starts saved-plan blueprints without activating them', async ({ page, context }) => {
+  await openApp(page); await makePlan(page);
+  await openMainPage(page, 'Plan');
+  await page.getByRole('button', { name: 'New plan', exact: true }).click();
+  await page.getByLabel('Plan name', { exact: true }).fill('Other routines');
+  await page.getByLabel('Workout name', { exact: true }).fill('Full upper');
+  await page.getByRole('button', { name: 'Add exercise', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Choose an exercise' }).getByRole('button', { name: /Barbell squat/ }).click();
+  await page.getByRole('button', { name: 'Duplicate workout', exact: true }).click();
+  await page.getByLabel('Workout name', { exact: true }).fill('Travel');
+  await page.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await expect(page.locator('.routine-group-heading h3')).toHaveText(['My strength plan', 'Other routines']);
+  await expect(page.locator('.routine-group').first()).toContainText('Current plan');
+  await expect(page.locator('.routine-group').last().getByRole('button')).toHaveCount(2);
+  expect(await page.locator('#today-workouts').evaluate(element => Boolean(element.compareDocumentPosition(document.querySelector('.calendar-section')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+  const before = await readPlans(page);
+  const source = JSON.parse(before).find((plan: { name: string }) => plan.name === 'Other routines');
+  expect(source.active).toBe(false);
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'Start Full upper from Other routines', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Full upper', exact: true })).toBeVisible();
+  await logSet(page, 1, '80', '8');
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('button', { name: 'Start Strength A from My strength plan', exact: true }).click();
+  const blocked = page.getByRole('dialog', { name: 'Workout already in progress', exact: true });
+  await expect(blocked).toContainText('Full upper is still in progress');
+  await blocked.getByRole('link', { name: 'Resume Full upper', exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole('spinbutton', { name: 'Weight set 1 Barbell squat', exact: true })).toHaveValue('80');
+  const saved = await page.evaluate(async () => new Promise<{ planId: string; workoutId: string }>((resolve, reject) => {
+    const request = indexedDB.open('fitcoach-user-e2e-user');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result, transaction = database.transaction('sessions', 'readonly');
+      const read = transaction.objectStore('sessions').getAll();
+      transaction.oncomplete = () => { database.close(); resolve(read.result[0]); };
+      transaction.onerror = () => { database.close(); reject(transaction.error); };
+    };
+  }));
+  expect(saved.planId).toBe(source.id);
+  expect(saved.workoutId).toBe(source.workouts[0].id);
+  await page.getByRole('button', { name: 'Finish workout', exact: true }).click();
+  await page.getByRole('button', { name: 'Save completed workout', exact: true }).click();
+  expect(await readPlans(page)).toBe(before);
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await expect(page.locator('.routine-group-heading h3')).toHaveText(['My strength plan', 'Other routines']);
+  await context.setOffline(false);
+});
+
+test('finishing an accidental workout offers discard and retains an uncompleted draft until confirmed', async ({ page, context }) => {
+  await openApp(page); await makePlan(page);
+  const before = await readPlans(page);
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'Start workout', exact: true }).click();
+  await page.getByRole('spinbutton', { name: 'Weight set 1 Barbell squat', exact: true }).fill('60');
+  await page.getByRole('spinbutton', { name: 'Reps set 1 Barbell squat', exact: true }).fill('8');
+  await page.getByRole('button', { name: 'Finish workout', exact: true }).click();
+  let discard = page.getByRole('dialog', { name: 'Discard this workout?', exact: true });
+  await expect(discard).toContainText('No sets have been logged');
+  await expect(discard).toContainText('Any entered weights, reps, and notes');
+  await expect(discard.getByRole('button', { name: 'Save completed workout', exact: true })).toHaveCount(0);
+  await discard.getByRole('button', { name: 'Keep workout', exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole('spinbutton', { name: 'Weight set 1 Barbell squat', exact: true })).toHaveValue('60');
+  await expect(page.getByRole('spinbutton', { name: 'Reps set 1 Barbell squat', exact: true })).toHaveValue('8');
+  await page.getByRole('button', { name: 'Finish workout', exact: true }).click();
+  discard = page.getByRole('dialog', { name: 'Discard this workout?', exact: true });
+  await discard.getByRole('button', { name: 'Discard workout', exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole('button', { name: 'Start workout', exact: true })).toBeVisible();
+  expect(await readPlans(page)).toBe(before);
+  const remaining = await page.evaluate(async () => new Promise<{ sessions: number; recoveries: number; mutations: number }>((resolve, reject) => {
+    const request = indexedDB.open('fitcoach-user-e2e-user');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result, transaction = database.transaction(['sessions', 'sync', 'outbox'], 'readonly');
+      const sessions = transaction.objectStore('sessions').getAll();
+      const sync = transaction.objectStore('sync').getAll();
+      const outbox = transaction.objectStore('outbox').getAll();
+      transaction.oncomplete = () => {
+        database.close();
+        resolve({ sessions: sessions.result.length,
+          recoveries: sync.result.filter(item => item.kind === 'recovery' && item.entity === 'sessions' && item.payload.blocks[0].sets[0].reps === 8).length,
+          mutations: outbox.result.filter(item => item.entity === 'sessions').length });
+      };
+      transaction.onerror = () => { database.close(); reject(transaction.error); };
+    };
+  }));
+  expect(remaining).toEqual({ sessions: 0, recoveries: 1, mutations: 0 });
+  await context.setOffline(false);
 });

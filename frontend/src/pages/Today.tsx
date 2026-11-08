@@ -2,10 +2,12 @@ import { useRef, useState } from 'react';
 import { ArrowRight, ArrowUpRight, CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Dumbbell, Flame, Info, MoveRight, Plus, Sparkles } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
 import { createSession, db, putLocalChange } from '../db';
-import { atNoon, localDate, uid, weekdayNames, type Workout } from '../domain';
+import { atNoon, localDate, uid, weekdayNames, type Plan, type Workout } from '../domain';
 import { completedStats, planWorkoutForDate, scheduledWorkout, startSession, weeklyStats } from '../training';
 import { useApp } from '../state';
 import { Empty, Modal, SectionTitle } from '../ui';
+
+type Routine = { plan: Plan; workout: Workout };
 
 export function Today() {
   const { profile, plans, exercises, sessions, overrides, run } = useApp();
@@ -13,12 +15,13 @@ export function Today() {
   const [date, setDate] = useState(localDate());
   const [moving, setMoving] = useState(false);
   const [moveDate, setMoveDate] = useState(localDate());
-  const [viewingWorkout, setViewingWorkout] = useState<Workout | null>(null);
-  const [blockedWorkout, setBlockedWorkout] = useState<Workout | null>(null);
+  const [viewingWorkout, setViewingWorkout] = useState<Routine | null>(null);
+  const [blockedWorkout, setBlockedWorkout] = useState<Routine | null>(null);
   const starting = useRef(false);
 
   // Only the active plan should determine the scheduled workouts on the calendar.
   const plan = plans.find(p => p.active);
+  const routinePlans = [...plans.filter(item => item.active), ...plans.filter(item => !item.active)];
 
   const getScheduled = (iso: string): Workout | undefined => planWorkoutForDate(plan, iso, overrides);
 
@@ -33,16 +36,17 @@ export function Today() {
   const completedOnDate = completed.find(s => s.date === date);
   const week = weeklyStats(sessions, 1)[0];
 
-  const start = async (workoutToStart: Workout) => {
+  const start = async (workoutToStart: Workout, sourcePlan = plan) => {
+    if (!sourcePlan) return;
     if (active) {
-      if (active.workoutId === workoutToStart.id) navigate(`/workout/${active.id}`);
-      else setBlockedWorkout(workoutToStart);
+      if (active.planId === sourcePlan.id && active.workoutId === workoutToStart.id) navigate(`/workout/${active.id}`);
+      else setBlockedWorkout({ plan: sourcePlan, workout: workoutToStart });
       return;
     }
-    if (!plan || starting.current) return;
+    if (starting.current) return;
     starting.current = true;
     try { await run(async () => {
-      const session = startSession(plan, workoutToStart, exercises, date);
+      const session = startSession(sourcePlan, workoutToStart, exercises, date);
       await createSession(session);
       navigate(`/workout/${session.id}`);
     }); } finally { starting.current = false; }
@@ -72,10 +76,10 @@ export function Today() {
     : completedOnDate
       ? 'Completed workout'
       : currentWorkout
-        ? 'On the schedule'
-        : plan
-          ? 'Rest day'
-          : 'On the schedule';
+        ? (isToday ? 'Start today’s workout' : 'Suggested workout')
+        : routinePlans.length
+          ? 'Choose a routine'
+          : 'Get started';
 
   return (
     <div className="page today-page">
@@ -136,8 +140,8 @@ export function Today() {
           <Link to={`/workout/${completedOnDate.id}`} className="button primary">
             View completed session<ArrowUpRight size={20} />
           </Link>
-          {currentWorkout && (
-            <button className="text-button hero-move" onClick={() => start(currentWorkout)}>
+          {routinePlans.some(item => item.workouts.length > 0) && (
+            <button className="text-button hero-move" onClick={() => document.getElementById('today-workouts')?.scrollIntoView({ block: 'start' })}>
               <Plus size={15} />Start another session
             </button>
           )}
@@ -162,7 +166,7 @@ export function Today() {
           <button className="button primary" onClick={() => start(currentWorkout)}>
             Start workout<ArrowRight size={20} />
           </button>
-          <button className="text-button hero-details" onClick={() => setViewingWorkout(currentWorkout)}>
+          <button className="text-button hero-details" onClick={() => setViewingWorkout({ plan: plan!, workout: currentWorkout })}>
             <Info size={14} />View plan details
           </button>
           {plan!.schedule === 'week' && (
@@ -171,13 +175,12 @@ export function Today() {
             </button>
           )}
         </div>
-      ) : plan ? (
+      ) : routinePlans.length ? (
         <div className="rest-card">
           <span className="empty-icon"><Flame size={24} /></span>
           <div>
-            <span className="pill">Rest day</span>
-            <h2>Rest day</h2>
-            <p>No workout scheduled for this day. Rest, recover, or choose a workout below if you want to train.</p>
+            <h2>Choose what you want to train</h2>
+            <p>No workout planned for this day. Start any routine below whenever you’re ready.</p>
           </div>
         </div>
       ) : (
@@ -188,6 +191,21 @@ export function Today() {
           to="/plan"
         />
       )}
+
+      {routinePlans.length > 0 && <section id="today-workouts" className="routine-library" aria-label="Your routines">
+        <SectionTitle title="Your routines"><Link to="/plan" className="text-button">Manage routines<ArrowUpRight size={15} /></Link></SectionTitle>
+        <p className="field-hint">Tap a routine to start. Your plan is a suggestion; choose what fits today.</p>
+        {routinePlans.map(sourcePlan => <section key={sourcePlan.id} className="routine-group" aria-label={`Workouts from ${sourcePlan.name}`}>
+          <div className="routine-group-heading"><h3>{sourcePlan.name}</h3><span>{sourcePlan.active ? 'Current plan' : 'Saved plan'}</span></div>
+          <div className="list-card">
+            {sourcePlan.workouts.map(workout => <button key={workout.id} className="workout-list-row" aria-label={`Start ${workout.name} from ${sourcePlan.name}`} onClick={() => void start(workout, sourcePlan)}>
+              <span className="exercise-icon"><Dumbbell size={20} /></span>
+              <div><strong>{workout.name}</strong><small>{workout.blocks.length} {workout.blocks.length === 1 ? 'exercise' : 'exercises'} · {workout.blocks.reduce((total, block) => total + block.sets.length, 0)} sets</small></div>
+              <span className="routine-start">Start<ArrowRight size={17} /></span>
+            </button>)}
+          </div>
+        </section>)}
+      </section>}
 
       <section className="calendar-section" aria-label="Workout calendar">
       <div className="week-heading">
@@ -229,26 +247,6 @@ export function Today() {
         <div><span>All time</span><strong>{completed.length}<small> workouts</small></strong></div>
       </div>
 
-      {plan && (
-        <>
-          <SectionTitle title="Your workouts">
-            <Link to="/plan" className="text-button">Edit plan<ArrowUpRight size={15} /></Link>
-          </SectionTitle>
-          <div className="list-card">
-            {plan.workouts.map((w, index) => (
-              <button key={w.id} className="workout-list-row" onClick={() => start(w)}>
-                <span className="row-index">{String(index + 1).padStart(2, '0')}</span>
-                <div>
-                  <strong>{w.name}</strong>
-                  <small>{w.blocks.length} exercises · {w.blocks.reduce((n, b) => n + b.sets.length, 0)} sets</small>
-                </div>
-                <ArrowUpRight size={20} />
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
       <Link to="/coach" className="coach-callout">
         <span className="coach-symbol"><Sparkles size={23} /></span>
         <div><strong>Talk through your training</strong><p>Explore your routine with Coach.</p></div>
@@ -268,18 +266,18 @@ export function Today() {
         </>
       )}
 
-      {!plan && (
+      {routinePlans.length === 0 && (
         <Link className="text-button" to="/coach"><Plus size={16} />Try a sample Coach plan</Link>
       )}
 
-      {blockedWorkout && active && <Modal title="Workout already in progress" onClose={() => setBlockedWorkout(null)}><p>{active.name} is still in progress. Finish it before starting {blockedWorkout.name}. Your recorded sets are kept.</p><div className="action-row"><Link className="button primary" to={`/workout/${active.id}`}>Resume {active.name}</Link><button className="button secondary" onClick={() => { setViewingWorkout(blockedWorkout); setBlockedWorkout(null); }}>Review {blockedWorkout.name}</button></div></Modal>}
+      {blockedWorkout && active && <Modal title="Workout already in progress" onClose={() => setBlockedWorkout(null)}><p>{active.name} is still in progress. Finish it before starting {blockedWorkout.workout.name}. Your recorded sets are kept.</p><div className="action-row"><Link className="button primary" to={`/workout/${active.id}`}>Resume {active.name}</Link><button className="button secondary" onClick={() => { setViewingWorkout(blockedWorkout); setBlockedWorkout(null); }}>Review {blockedWorkout.workout.name}</button></div></Modal>}
       {viewingWorkout && (
-        <Modal title={viewingWorkout.name} onClose={() => setViewingWorkout(null)}>
+        <Modal title={viewingWorkout.workout.name} onClose={() => setViewingWorkout(null)}>
           <p className="field-hint">
-            Scheduled plan for {atNoon(date).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
+            Workout preview for {atNoon(date).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
           </p>
           <div className="workout-detail-modal-blocks">
-            {viewingWorkout.blocks.map((block, bi) => {
+            {viewingWorkout.workout.blocks.map((block, bi) => {
               const ex = exercises.find(e => e.id === block.exerciseId);
               const workingSets = block.sets.filter(s => s.kind !== 'warmup');
               return (
@@ -293,7 +291,7 @@ export function Today() {
               );
             })}
           </div>
-          <button className="button primary" onClick={() => { setViewingWorkout(null); start(viewingWorkout); }}>
+          <button className="button primary" onClick={() => { setViewingWorkout(null); start(viewingWorkout.workout, viewingWorkout.plan); }}>
             Start this workout<ArrowRight size={18} />
           </button>
         </Modal>

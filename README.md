@@ -77,7 +77,7 @@ Chat messages render Markdown, including headings, emphasis, lists, links, code 
 
 Coach uses ChatGPT for freeform conversation when the signed-in account has granted ChatGPT plan usage and the API is reachable. Connected conversations are stored in PostgreSQL and can be reopened from another signed-in device; each has its own LangGraph thread. New Chat, switching, renaming, and deletion are available in Coach. Offline or disconnected Coach continues to use labeled sample responses and editable sample plan proposals. Review and apply a proposal to save it; proposals do not change your plan automatically. Live replies can create durable server-backed plan proposals using account-scoped plans, exercise definitions, profile information, and recorded performance. The Coach renders the structured preview and requires explicit approval or rejection. Approval is online-only and requires a clean local sync state; the API rechecks account ownership and source ETag before applying the plan through the same aggregate writer used by sync. Conversation history does not enter workout sync or IndexedDB outbox mutations. The typed `ChatAdapter` in `frontend/src/coach.ts` keeps the two modes separate.
 
-Coach uses a compact header with searchable conversation history under **Chats**. Rename and delete actions open in-app dialogs; deleting a conversation keeps training plans and workout records. Connection details are expandable, and the message composer grows with longer drafts.
+Coach opens as a focused chat view with one compact toolbar and no global header or bottom tabs. Back to Today restores the main navigation. The toolbar keeps the conversation title, searchable **Chats**, New chat, and sync/settings access; repeated model and save-status text is omitted. Rename and delete use in-app dialogs. An active workout has a compact Resume link above the composer, which grows with longer drafts.
 
 The PWA does not currently call Ollama or the Python backend. That existing backend and its scientific corpus remain available separately below.
 
@@ -321,3 +321,11 @@ coach = FitCoachService().initialize()
 result = coach.answer("How much protein should I eat?")
 print(result.text)
 ```
+
+Today puts the suggested workout first, then lists all saved routines directly below it: current-plan workouts first, followed by workouts grouped under their other saved plans. Each row starts that routine in one tap, using its source plan without activating it. The calendar and stats sit below the routine library. **Start another session** jumps to this list after a completed workout. Weekly schedules stay unchanged; completing an out-of-order rotation workout leaves that plan’s next workout in place.
+
+Active workouts hide the global header and bottom tabs to give set entry more space. The Today back control remains above the scrolling workout content and returns to the main screens without ending the session; sync/settings remains available beside the workout status. Completed workout logs retain the main navigation.
+
+Background synchronization does not show banners or popups. Its compact status indicator and Settings keep pending uploads, failures, and conflicts available for review.
+
+Finishing a workout with no checked-off sets offers **Discard workout** or **Keep workout**, rather than trying to save an empty history entry. Discarding uses the existing recoverable deletion and sync outbox, and does not advance the rotation. Entered values and notes are explicitly covered by the discard confirmation.

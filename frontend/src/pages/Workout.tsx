@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Check, CheckCheck, ChevronDown, Clock3, Dumbbell, Minus, Pause, Pencil, Play, Plus, RotateCcw, SkipForward, Trash2 } from 'lucide-react';
+import { ArrowLeft, Check, CheckCheck, ChevronDown, Clock3, Dumbbell, Minus, Pause, Pencil, Play, Plus, RotateCcw, SkipForward, Trash2, Settings as SettingsIcon } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { db, deleteLocalChange } from '../db';
 import { atNoon, formatLoad, newSet, sessionSchema, toKg, uid, type LoggedSet, type Profile, type Session, type Timer } from '../domain';
@@ -24,7 +24,7 @@ function signalRestEnd() {
   } catch { /* Logging never depends on alert support. */ }
 }
 
-export function WorkoutPage() {
+export function WorkoutPage({ syncLabel }: { syncLabel: string }) {
   const { id } = useParams(); const navigate = useNavigate();
   const { sessions, profile, run, notify } = useApp();
   const session = sessions.find(s => s.id === id);
@@ -32,6 +32,8 @@ export function WorkoutPage() {
   const [editing, setEditing] = useState(false);
   const [substitute, setSubstitute] = useState<number | 'new' | null>(null);
   const [confirmFinish, setConfirmFinish] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const [duration, setDuration] = useState(90);
   const [timerSetup, setTimerSetup] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
@@ -77,8 +79,9 @@ export function WorkoutPage() {
     if (kind === 'warmup') block.sets.unshift(set); else block.sets.push(set);
   });
   return <div className="workout-layout">
+    <div className="workout-page-top"><Link className="text-button" to={active ? '/' : '/history'}><ArrowLeft size={17} />{active ? 'Today' : 'History'}</Link><div className="workout-page-status"><span className="pill">{active ? <><span className="pulse" />In progress</> : <><CheckCheck size={14} />Completed</>}</span>{active && <Link to="/settings" className="icon-button workout-sync-link" aria-label={`Settings. Synchronization: ${syncLabel}`} title={`Settings · ${syncLabel}`}><SettingsIcon size={20} /><span className={syncLabel === 'Synced' ? 'sync-dot synced' : 'sync-dot'} /></Link>}</div></div>
     {active && session.timer && <RestTimer timer={session.timer} onChange={timer => update(s => { s.timer = timer; })} onExpire={() => notify('Rest complete. Ready for your next set.')} />}
-<div className="page workout-page"><div className="workout-page-top"><Link className="text-button" to={active ? '/' : '/history'}><ArrowLeft size={17} />{active ? 'Today' : 'History'}</Link><span className="pill">{active ? <><span className="pulse" />In progress</> : <><CheckCheck size={14} />Completed</>}</span></div>
+<div className="page workout-page">
     <div className="page-heading compact-heading"><span className="eyebrow">{atNoon(session.date).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</span><h1>{session.name}</h1><p>{session.blocks.length} exercises · {done} of {total} sets logged</p></div>
     <div className="progress-track" role="progressbar" aria-label="Workout sets completed" aria-valuenow={done} aria-valuemin={0} aria-valuemax={total}><div style={{ width: `${total ? done / total * 100 : 0}%` }} /></div>
     {!active && <div className="action-row"><button className="button secondary" onClick={() => setEditing(!editing)}>{editing ? <Check size={16} /> : <Pencil size={16} />}{editing ? 'Done editing' : 'Edit log'}</button><span className="small-muted">{stats.sets} working sets · {Math.round(Number(formatLoad(stats.volumeKg, profile.unit))).toLocaleString()} {profile.unit} volume</span></div>}
@@ -115,9 +118,22 @@ export function WorkoutPage() {
     })}</div>
     {editable && <button className="button dashed" onClick={() => setSubstitute('new')}><Plus size={18} />Add exercise to this session</button>}
     {editable ? <label className="notes-label session-notes">Workout notes<textarea key={`${session.id}-session-notes`} defaultValue={session.notes} rows={2} placeholder="A little context for next time." onBlur={e => update(s => { s.notes = e.target.value; })} /></label> : session.notes && <p className="card-note">{session.notes}</p>}
-    {active && <><button className="text-button danger" onClick={async () => {
-      if (window.confirm('Discard this unfinished workout and its logged sets?')) if (await run(() => deleteLocalChange('sessions', session.id, db.sessions))) navigate('/');
-    }}><Trash2 size={15} />Discard session</button></>}
+    {active && <button className="text-button danger" onClick={() => setConfirmDiscard(true)}><Trash2 size={15} />Discard session</button>}
+    {confirmDiscard && <Modal title={done ? 'Discard workout?' : 'Discard this workout?'} onClose={() => { if (!discarding) setConfirmDiscard(false); }}>
+      <p>{done ? `This removes the unfinished workout and its ${done} logged ${done === 1 ? 'set' : 'sets'}.` : 'No sets have been logged. You can discard this workout and start again whenever you’re ready.'}</p>
+      <p className="field-hint">Any entered weights, reps, and notes will be removed from this session. Your routine and schedule stay the same.</p>
+      <div className="action-row">
+        <button className="button secondary" disabled={discarding} onClick={() => setConfirmDiscard(false)}>Keep workout</button>
+        <button className="button primary" disabled={discarding} onClick={async () => {
+          if (discarding) return;
+          const database = db;
+          setDiscarding(true);
+          try {
+            if (await run(() => deleteLocalChange('sessions', session.id, database.sessions, database))) navigate('/');
+          } finally { setDiscarding(false); }
+        }}>{discarding ? 'Discarding…' : 'Discard workout'}</button>
+      </div>
+    </Modal>}
     {timerSetup && <Modal title="Rest timer" onClose={() => setTimerSetup(false)}><label>Duration (seconds)<input type="number" inputMode="numeric" min={1} max={1800} value={duration} onChange={e => setDuration(Number(e.target.value))} /></label><div className="chip-row">{[60, 90, 120, 180].map(seconds => <button className={`chip ${duration === seconds ? 'selected' : ''}`} key={seconds} onClick={() => setDuration(seconds)}>{seconds}s</button>)}</div><p className="field-hint">The timer resumes accurately when you return. Sound and vibration work while the app is open; locked-screen alerts depend on your browser.</p><button className="button primary" onClick={async () => { if (duration < 1 || duration > 1800) return; if (await update(s => { s.timer = { duration, remaining: duration, endAt: Date.now() + duration * 1000 }; })) setTimerSetup(false); }}><Play size={18} />Start timer</button></Modal>}
     {confirmFinish && <Modal title="Finish workout?" onClose={() => setConfirmFinish(false)}><div className="finish-summary"><CheckCheck size={35} /><h2>Review your session</h2><p>{done} sets logged across {session.blocks.length} exercises.</p></div>{done < total && <p className="field-hint">{total - done} unfinished sets will stay uncompleted in your log.</p>}<button className="button primary" onClick={async () => {
       if (await run(() => finishSession(session), 'Workout saved. Nice work.')) { setConfirmFinish(false); navigate('/history'); }
@@ -135,7 +151,7 @@ export function WorkoutPage() {
       if (saved) { setSubstitute(null); if (substitute === 'new') setExpanded(session.blocks.length); }
     }} />}
   </div>
-    {active && <div className="session-actions"><button className="button secondary" onClick={() => { unlockAudio(); setTimerSetup(true); }}><Clock3 size={18} />Rest timer</button><button className="button primary" onClick={() => setConfirmFinish(true)}>Finish workout<CheckCheck size={18} /></button></div>}
+    {active && <div className="session-actions"><button className="button secondary" onClick={() => { unlockAudio(); setTimerSetup(true); }}><Clock3 size={18} />Rest timer</button><button className="button primary" onClick={() => { if (done) setConfirmFinish(true); else setConfirmDiscard(true); }}>Finish workout<CheckCheck size={18} /></button></div>}
   </div>;
 }
 
