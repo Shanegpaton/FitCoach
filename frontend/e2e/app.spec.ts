@@ -254,6 +254,25 @@ test('Coach renders rich replies safely on phones and preserves diagram source',
   const footnote = replyElement.locator('a[data-footnote-ref]');
   const footnoteTarget = await footnote.getAttribute('href');
   expect(await page.locator(`[id="${footnoteTarget!.slice(1)}"]`).count()).toBe(1);
+  const originalUrl = page.url();
+  const composerBeforeFootnotes = await page.locator('.chat-composer').boundingBox();
+  const assertChatBounds = async () => {
+    expect(page.url()).toBe(originalUrl);
+    expect(await page.locator('#main-content').evaluate(element => element.scrollTop)).toBe(0);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    const composer = await page.locator('.chat-composer').boundingBox();
+    expect(composer!.y).toBeCloseTo(composerBeforeFootnotes!.y, 0);
+    expect(composer!.y + composer!.height).toBeLessThanOrEqual(await page.evaluate(() => innerHeight));
+  };
+  await footnote.click();
+  await expect(replyElement.locator('.footnotes li')).toBeFocused();
+  await assertChatBounds();
+  const returnLink = replyElement.locator('a[data-footnote-backref]');
+  await returnLink.focus();
+  await page.keyboard.press('Enter');
+  await expect(footnote).toBeFocused();
+  await assertChatBounds();
+
   await expect(replyElement.getByRole('link', { name: 'Training reference' })).toHaveAttribute('rel', 'noopener noreferrer');
   await expect(replyElement.locator('a[href^="javascript:"]')).toHaveCount(0);
   expect(await page.evaluate(() => 'coachUnsafe' in window)).toBe(false);
@@ -1055,7 +1074,7 @@ test('workout and Coach controls stay unobscured, and repeat set requires confir
   await openCoach(page);
   await expectUsable(page, page.getByRole('button', { name: /Change my rest periods/ }));
   const input = page.getByLabel('Message Coach');
-  await input.fill('First line'); await input.press('Enter'); await input.pressSequentially('Second line');
+  await input.fill('First line'); await input.press('Shift+Enter'); await input.pressSequentially('Second line');
   await expect(input).toHaveValue('First line\nSecond line');
   await expectUsable(page, input);
   await expectUsable(page, page.getByRole('button', { name: 'Send message' }));
@@ -1421,9 +1440,15 @@ test('Coach shows the sent message immediately and streams the reply before comp
   });
   await openApp(page); await openCoach(page);
   await expect(page.getByRole('button', { name: 'Chats', exact: true })).toBeVisible();
+  await page.locator('#main-content').focus();
+  await expect(page.locator('#main-content')).toHaveCSS('outline-style', 'none');
   await page.getByLabel('Message Coach').fill('How should I begin?');
-  await page.getByRole('button', { name: 'Send message' }).click();
-  await expect(page.locator('.message.user')).toHaveText('How should I begin?');
+  await page.getByLabel('Message Coach').press('Shift+Enter');
+  await page.getByLabel('Message Coach').pressSequentially('I have two days available.');
+  await expect(page.getByLabel('Message Coach')).toHaveValue('How should I begin?\nI have two days available.');
+  await expect(page.locator('.message.user')).toHaveCount(0);
+  await page.getByLabel('Message Coach').press('Enter');
+  await expect(page.locator('.message.user')).toHaveText('How should I begin?\nI have two days available.');
   await expect(page.getByLabel('Message Coach')).toHaveValue('');
   await expect(page.getByLabel('Preparing Coach response')).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-coach-stream-ready', 'true');

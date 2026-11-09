@@ -726,9 +726,9 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
           placeholder="Ask about your training"
           rows={1}
           onKeyDown={e => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
               e.preventDefault();
-              void send();
+              if (!blocked && !e.repeat) void send();
             }
           }}
         />

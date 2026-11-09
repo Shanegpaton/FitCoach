@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useState, type ComponentProps } from 'react';
+import { memo, useEffect, useId, useState, type ComponentProps, type MouseEvent } from 'react';
 import Markdown, { defaultUrlTransform, type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -95,6 +95,24 @@ function MessageImage({ src, alt }: { src?: string; alt?: string }) {
     : <button type="button" onClick={() => { setFailed(false); setLoadedSrc(src); }}>{failed ? 'Retry image' : 'Load image'}: {alt || url.hostname}</button>}</span>;
 }
 
+function followMessageAnchor(event: MouseEvent<HTMLAnchorElement>) {
+  const href = event.currentTarget.getAttribute('href');
+  if (!href?.startsWith('#')) return;
+  // Native fragment navigation scrolls every ancestor, including the app shell.
+  // Keep generated references inside their own message and the chat scroll pane.
+  event.preventDefault();
+  let id: string;
+  try { id = decodeURIComponent(href.slice(1)); }
+  catch { return; }
+  const message = event.currentTarget.closest('.message-markdown');
+  const pane = event.currentTarget.closest<HTMLElement>('.coach-scroll');
+  const target = Array.from(message?.querySelectorAll<HTMLElement>('[id]') ?? []).find(element => element.id === id);
+  if (!pane || !target) return;
+  if (!target.hasAttribute('tabindex') && target.tabIndex < 0) target.tabIndex = -1;
+  target.focus({ preventScroll: true });
+  pane.scrollTo({ top: pane.scrollTop + target.getBoundingClientRect().top - pane.getBoundingClientRect().top - pane.clientTop - 16, behavior: 'instant' });
+}
+
 function RichMarkdown({ text }: { text: string }) {
   const id = useId().replace(/:/g, '');
   return <Markdown skipHtml remarkPlugins={[remarkGfm, remarkMath]}
@@ -106,7 +124,7 @@ function RichMarkdown({ text }: { text: string }) {
         : key === 'src' && /^https?:\/\//i.test(safe) ? safe : '';
     }}
     components={{ pre: CodeBlock, img: MessageImage,
-      a: ({ node: _node, href, ...props }) => href ? <a {...props} href={href} target={href.startsWith('#') ? undefined : '_blank'} rel="noopener noreferrer" /> : <span>{props.children}</span>,
+      a: ({ node: _node, href, ...props }) => href ? <a {...props} href={href} onClick={followMessageAnchor} target={href.startsWith('#') ? undefined : '_blank'} rel="noopener noreferrer" /> : <span>{props.children}</span>,
       table: ({ children }) => <div className="coach-table-scroll" role="region" aria-label="Coach table, scroll for more columns" tabIndex={0}><table>{children}</table></div>,
     }}>{text}</Markdown>;
 }
