@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TrainingDB, applyProposal, cacheApprovedProposal, cacheApprovedWorkout, createSession, enqueueChange, exportBackup, finishSession, hasLegacyData, importBackup, importLegacyData, initialize, savePlan, syncRootId } from './db';
+import { TrainingDB, applyProposal, cacheApprovedProposal, cacheApprovedWorkout, createSession, enqueueChange, exportBackup, finishSession, hasLegacyData, importBackup, importLegacyData, initialize, putLocalChange, savePlan, syncRootId } from './db';
 import { catalog, starterPlan } from './catalog';
 import { backupSchema, defaultProfile, uid, type Proposal } from './domain';
 import { startSession } from './training';
@@ -176,6 +176,42 @@ describe('approved Coach workout starts', () => {
       expect(await account.sessions.get(second.id)).toEqual(second);
       expect(await account.outbox.toArray()).toEqual(pending);
       expect((await account.sync.get(syncRootId('user-a', 'sessions', second.id)))?.etag).toBe('"1"');
+    } finally { await account.delete(); }
+  });
+});
+
+describe('training profile and workout duration compatibility', () => {
+  it('imports legacy backups without assigning their profile duration to workouts', async () => {
+    await savePlan(starterPlan(defaultProfile), db);
+    const legacy = await exportBackup(db);
+    legacy.profile.sessionMinutes = 90;
+    await importBackup(legacy, db);
+    const restored = await exportBackup(db);
+    expect(restored.profile.sessionMinutes).toBe(90);
+    expect(restored.profile.daysPerWeek).toBeUndefined();
+    expect(restored.plans[0].workouts.every(workout => workout.durationMinutes === undefined)).toBe(true);
+  });
+  it('preserves preferences and independent workout durations through backup and account outbox writes', async () => {
+    const account = new TrainingDB(`preferences-${uid()}`, 'preferences-user');
+    try {
+      await initialize(account);
+      const profile = { ...defaultProfile, trainingBackground: 'Returning after a break', daysPerWeek: 4,
+        exercisePreferences: 'Prefer dumbbells', limitations: 'Need alternatives for overhead work' };
+      await putLocalChange('profile', profile, account.profile, account);
+      const plan = starterPlan(profile);
+      plan.workouts[0].durationMinutes = 35; plan.workouts[1].durationMinutes = 70;
+      await savePlan(plan, account);
+      const backup = await exportBackup(account);
+      await importBackup(backup, db);
+      expect((await exportBackup(db)).profile).toEqual(profile);
+      expect((await db.plans.get(plan.id))?.workouts.map(workout => workout.durationMinutes)).toEqual([35, 70]);
+      const profileChange = await account.outbox.where('entity').equals('profile').first();
+      expect(profileChange?.payload).toEqual(profile);
+      const pending = await account.outbox.where('entity').equals('plans').first();
+      expect(pending?.payload).toMatchObject({ workouts: [{ durationMinutes: 35 }, { durationMinutes: 70 }] });
+      const invalid = structuredClone(backup); invalid.plans[0].workouts[0].durationMinutes = 0;
+      await expect(importBackup(invalid, db)).rejects.toThrow();
+      expect((await db.plans.get(plan.id))?.workouts[0].durationMinutes).toBe(35);
     } finally { await account.delete(); }
   });
 });

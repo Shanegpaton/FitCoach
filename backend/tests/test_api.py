@@ -384,3 +384,29 @@ async def test_aggregate_rules_are_rechecked_within_mutation_transaction(api):
             await Store(transaction, users['a']).put('plans', parsed, None)
     assert error.value.status_code == 422
     assert (await client.get('/v1/plans', headers=headers())).json()['items'] == []
+
+
+async def test_training_preferences_and_duration_survive_older_client_writes(api):
+    client, _, _, _ = api
+    preferences = profile() | {'trainingBackground': 'Training for years', 'daysPerWeek': 4,
+                              'exercisePreferences': 'Dumbbells', 'limitations': 'Avoid overhead work'}
+    saved_profile = await put(client, 'profile', preferences)
+    assert saved_profile.status_code == 201, saved_profile.text
+    assert saved_profile.json() == preferences
+    older_profile = await put(client, 'profile', profile(), tag=saved_profile.headers['etag'])
+    assert older_profile.json() == preferences
+    cleared = await put(client, 'profile', preferences | {'daysPerWeek': None, 'limitations': ''},
+                        tag=older_profile.headers['etag'])
+    assert 'daysPerWeek' not in cleared.json()
+    assert cleared.json()['limitations'] == ''
+
+    routine = plan()
+    routine['workouts'][0]['durationMinutes'] = 35
+    saved_plan = await put(client, 'plans', routine)
+    assert saved_plan.status_code == 201, saved_plan.text
+    assert saved_plan.json() == routine
+    older_plan = await put(client, 'plans', plan(), tag=saved_plan.headers['etag'])
+    assert older_plan.json()['workouts'][0]['durationMinutes'] == 35
+    routine['workouts'][0]['durationMinutes'] = None
+    cleared_plan = await put(client, 'plans', routine, tag=older_plan.headers['etag'])
+    assert 'durationMinutes' not in cleared_plan.json()['workouts'][0]

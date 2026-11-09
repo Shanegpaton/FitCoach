@@ -95,3 +95,23 @@ async def test_auth_errors(kind):
         with pytest.raises(HTTPException) as error:
             await verifier.verify('token')
         assert error.value.status_code == (401 if kind == 'invalid' else 503)
+
+
+@pytest.mark.parametrize('field,value', [
+    ('daysPerWeek', 0), ('daysPerWeek', 8), ('daysPerWeek', True),
+    ('trainingBackground', 'a' * 2001), ('exercisePreferences', 'a' * 2001),
+    ('limitations', 'a' * 2001),
+])
+def test_invalid_training_preferences_rejected(field, value):
+    from backend.domain import Profile
+    from backend.tests.fixtures import profile
+    with pytest.raises(ValidationError):
+        Profile.model_validate(profile() | {field: value})
+
+
+@pytest.mark.parametrize('duration', [0, 9, 181, True, 35.5, '35'])
+def test_invalid_workout_duration_rejected(duration):
+    document = plan()
+    document['workouts'][0]['durationMinutes'] = duration
+    with pytest.raises(ValidationError):
+        Plan.model_validate(document)

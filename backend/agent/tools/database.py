@@ -415,7 +415,11 @@ async def _exercise_history(data: Store, args: ExerciseHistory, today: date):
 
 async def _profile(data: Store):
     row = await data.root(tables.profiles, 'profile')
-    return {'profile': (await data.documents('profile', [row]))[0] if row else None}
+    profile = (await data.documents('profile', [row]))[0] if row else None
+    if profile:
+        # Legacy profile-wide duration no longer describes workout targets.
+        profile.pop('sessionMinutes', None)
+    return {'profile': profile}
 
 
 async def _search_plans(data: Store, args: PlanSearch):

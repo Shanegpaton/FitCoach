@@ -10,7 +10,7 @@ import { Empty, Modal, SectionTitle } from '../ui';
 type Routine = { plan: Plan; workout: Workout };
 
 export function Today() {
-  const { profile, plans, exercises, sessions, overrides, run } = useApp();
+  const { plans, exercises, sessions, overrides, run } = useApp();
   const navigate = useNavigate();
   const [date, setDate] = useState(localDate());
   const [moving, setMoving] = useState(false);
@@ -155,7 +155,7 @@ export function Today() {
           <h2>{currentWorkout.name}</h2>
           <div className="hero-meta">
             <span><Dumbbell size={15} />{currentWorkout.blocks.length} exercises</span>
-            <span><Clock3 size={15} />{profile.sessionMinutes} min target</span>
+            {currentWorkout.durationMinutes != null && <span><Clock3 size={15} />{currentWorkout.durationMinutes} min target</span>}
           </div>
           <div className="hero-exercises">
             {currentWorkout.blocks.slice(0, 3).map(b => (
@@ -200,7 +200,7 @@ export function Today() {
           <div className="list-card">
             {sourcePlan.workouts.map(workout => <button key={workout.id} className="workout-list-row" aria-label={`Start ${workout.name} from ${sourcePlan.name}`} onClick={() => void start(workout, sourcePlan)}>
               <span className="exercise-icon"><Dumbbell size={20} /></span>
-              <div><strong>{workout.name}</strong><small>{workout.blocks.length} {workout.blocks.length === 1 ? 'exercise' : 'exercises'} · {workout.blocks.reduce((total, block) => total + block.sets.length, 0)} sets</small></div>
+              <div><strong>{workout.name}</strong><small>{workout.blocks.length} {workout.blocks.length === 1 ? 'exercise' : 'exercises'} · {workout.blocks.reduce((total, block) => total + block.sets.length, 0)} sets{workout.durationMinutes != null && ` · ${workout.durationMinutes} min target`}</small></div>
               <span className="routine-start">Start<ArrowRight size={17} /></span>
             </button>)}
           </div>

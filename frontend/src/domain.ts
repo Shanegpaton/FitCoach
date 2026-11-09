@@ -9,7 +9,11 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
 }, 'Invalid calendar date');
 export const profileSchema = z.object({
   id: z.literal('profile'), goals: z.string().max(2000), experience: z.string(),
+  // sessionMinutes is retained for legacy backups/sync; duration now belongs to workouts.
   equipment: z.array(z.string()), trainingDays: z.array(day), sessionMinutes: z.number().int().min(10).max(180),
+  trainingBackground: z.string().max(2000).optional(),
+  daysPerWeek: z.number().int().min(1).max(7).nullable().optional(),
+  exercisePreferences: z.string().max(2000).optional(), limitations: z.string().max(2000).optional(),
   unit: z.enum(['lb', 'kg']), onboardingDone: z.boolean(),
 });
 export const exerciseSchema = z.object({
@@ -25,7 +29,8 @@ export const blockSchema = z.object({
   sets: z.array(prescriptionSchema).min(1).max(40),
 });
 export const workoutSchema = z.object({
-  id, name: z.string().trim().min(1).max(100), days: z.array(day), blocks: z.array(blockSchema).min(1).max(50),
+  id, name: z.string().trim().min(1).max(100), days: z.array(day),
+  durationMinutes: z.number().int().min(10).max(180).nullable().optional(), blocks: z.array(blockSchema).min(1).max(50),
 });
 export const planSchema = z.object({
   id, name: z.string().trim().min(1).max(100), description: z.string().max(2000).default(''), schedule: z.enum(['week', 'rotation']),

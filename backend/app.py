@@ -568,14 +568,14 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
             results.append(result)
         return {'results': results}
 
-    @app.get('/v1/profile', response_model=Profile)
+    @app.get('/v1/profile', response_model=Profile, response_model_exclude_unset=True)
     async def profile(response: Response, user: User):
         async with store(user) as data:
             document, row = await data.read('profile', 'profile')
             response.headers['ETag'] = etag(row)
             return document
 
-    @app.put('/v1/profile', response_model=Profile)
+    @app.put('/v1/profile', response_model=Profile, response_model_exclude_unset=True)
     async def put_profile(body: Profile, response: Response, user: User, if_match: Match = None):
         async with store(user, mutation=True) as data:
             document, row, created = await data.put('profile', body, if_match)
@@ -610,10 +610,10 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
             return Response(status_code=204)
 
         base = f'/v1/{resource}'
-        app.add_api_route(base, listing, methods=['GET'], response_model=Page[model], name=f'list_{resource}')
-        app.add_api_route(base + '/{client_id}', read, methods=['GET'], response_model=model, name=f'get_{resource}')
+        app.add_api_route(base, listing, methods=['GET'], response_model=Page[model], response_model_exclude_unset=True, name=f'list_{resource}')
+        app.add_api_route(base + '/{client_id}', read, methods=['GET'], response_model=model, response_model_exclude_unset=True, name=f'get_{resource}')
         if not readonly:
-            app.add_api_route(base + '/{client_id}', put, methods=['PUT'], response_model=model, name=f'put_{resource}')
+            app.add_api_route(base + '/{client_id}', put, methods=['PUT'], response_model=model, response_model_exclude_unset=True, name=f'put_{resource}')
             app.add_api_route(base + '/{client_id}', delete, methods=['DELETE'], status_code=204, name=f'delete_{resource}')
 
     for resource, model in [('exercises', Exercise), ('plans', Plan), ('sessions', Session),

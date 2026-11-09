@@ -1,8 +1,6 @@
-import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
+import { createContext, lazy, Suspense, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { CoachContextStatus } from '../coachContext';
-import Markdown from 'react-markdown';
 import { Link } from 'react-router';
-import remarkGfm from 'remark-gfm';
 import { ArrowRight, Check, MessageCircle, Plus, Send, Sparkles, X, Pencil, Trash2, ArrowLeft, Settings as SettingsIcon, Search } from 'lucide-react';
 import { db, applyProposal, cacheApprovedProposal, enqueueChange, putLocalChange, syncRootId } from '../db';
 import { assistantMessage, sampleCoach, isWorkoutProposal } from '../coach';
@@ -14,6 +12,9 @@ import { PlanEditor } from './Plans';
 import { Modal, ProposalReadiness } from '../ui';
 import { WorkoutProposal } from './WorkoutProposal';
 import type { ServerProposal, ServerWorkoutProposal } from '../coach';
+
+const CoachMarkdown = lazy(() => import('../CoachMarkdown').then(module => ({ default: module.CoachMarkdown })));
+const CopyText = lazy(() => import('../CoachMarkdown').then(module => ({ default: module.CopyText })));
 
 function ProposalOperation({ operation, before, after, exercises, unit }: {
   operation: Record<string, unknown>; before?: Plan; after: Plan; exercises: Exercise[]; unit: Profile['unit'];
@@ -576,9 +577,12 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
                 {message.role === 'assistant' && (
                   <span className="eyebrow">Coach · {message.source === 'chatgpt' ? 'ChatGPT' : 'Sample response'}</span>
                 )}
-                <div className="message-markdown">
-                  <Markdown remarkPlugins={[remarkGfm]}>{message.text}</Markdown>
-                </div>
+                <Suspense fallback={<div className="message-markdown">{message.text}</div>}>
+                  <div className="message-markdown">
+                    <CoachMarkdown text={message.text} />
+                  </div>
+                  {message.role === 'assistant' && <CopyText text={message.text} label="Copy reply" />}
+                </Suspense>
                 {workoutProposal && userId && <WorkoutProposal key={`${userId}:${activeConversationId}:${workoutProposal.id}`} proposal={workoutProposal} userId={userId} ready={trainingDataReady} unit={profile.unit} run={run} onStatus={status => setWorkoutProposals(items => items.map(item => item.id === workoutProposal.id ? { ...item, status } : item))} />}
                 {proposal && (
                   <div className="proposal-card">

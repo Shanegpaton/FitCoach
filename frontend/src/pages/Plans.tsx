@@ -21,7 +21,7 @@ export function Plans() {
       : <div className="plan-grid">{plans.map(plan => <article className={`plan-card ${plan.active ? 'is-active' : ''}`} key={plan.id}>
         <div className="card-top"><span className={plan.active ? 'pill accent' : 'pill'}>{plan.active ? <><Check size={13} />Active plan</> : 'Saved plan'}</span><span className="small-muted">{plan.schedule === 'week' ? 'Weekly schedule' : 'Rotation'}</span></div>
         <h2>{plan.name}</h2>{plan.description && <p>{plan.description}</p>}<p>{plan.workouts.length} workouts · {plan.workouts.reduce((n, w) => n + w.blocks.length, 0)} exercise slots</p>
-        <div className="plan-preview">{plan.workouts.map((w, i) => <div key={w.id}><span className="row-index">{String(i + 1).padStart(2, '0')}</span><strong>{w.name}</strong><small>{w.blocks.length} exercises</small></div>)}</div>
+        <div className="plan-preview">{plan.workouts.map((w, i) => <div key={w.id}><span className="row-index">{String(i + 1).padStart(2, '0')}</span><strong>{w.name}</strong><small>{w.blocks.length} exercises{w.durationMinutes != null && ` · ${w.durationMinutes} min target`}</small></div>)}</div>
         <div className="card-actions"><button className="button secondary" onClick={() => setEditing(structuredClone(plan))}><Pencil size={16} />Edit plan</button>{!plan.active && <button className="text-button" onClick={() => run(() => savePlan({ ...plan, active: true }), 'Active plan updated')}>Make active</button>}<button className="icon-button" aria-label={`Duplicate ${plan.name}`} onClick={() => duplicate(plan)}><Copy size={18} /></button></div>
       </article>)}</div>}
     {plans.length > 0 && <button className="text-button" onClick={() => setEditing(starterPlan(profile))}>Explore a sample template<ArrowRight size={16} /></button>}
@@ -103,6 +103,8 @@ export function PlanEditor({ initial, onClose, onSave, saveLabel = 'Save plan', 
         setPlan({ ...plan, cursor: 0, workouts: plan.workouts.filter(w => w.id !== workout.id) }); setIndex(Math.max(0, index - 1));
       }
     }}><Trash2 size={17} /></button></div></div>
+    <label>Workout duration target (minutes, optional)<input type="number" inputMode="numeric" min={10} max={180} placeholder="No target" value={workout.durationMinutes ?? ''} onChange={e => changeWorkout(w => { w.durationMinutes = e.target.value === '' ? null : Number(e.target.value); })} /></label>
+    <p className="field-hint">Set this for this workout only. For example, 35 minutes for Push and 70 for Upper body. Leave blank for no time target.</p>
     {plan.schedule === 'week' && <label className="days-label">Training days<Days value={workout.days} onChange={chooseDays} /></label>}
     <div className="editor-blocks">{workout.blocks.map((block, bi) => {
       const exercise = exercises.find(e => e.id === block.exerciseId);

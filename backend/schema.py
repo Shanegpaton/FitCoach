@@ -74,8 +74,14 @@ def exercise_checks():
 
 profiles = owned('profiles', col('goals', sa.Text), col('experience', sa.Text),
     col('equipment', ARRAY(sa.Text)), col('training_days', ARRAY(sa.Integer)),
+    col('training_background', sa.Text, True), col('days_per_week', sa.Integer, True),
+    col('exercise_preferences', sa.Text, True), col('limitations', sa.Text, True),
     col('session_minutes', sa.Integer), col('unit', sa.Text), col('onboarding_done', sa.Boolean),
     constraints=[sa.UniqueConstraint('user_id'), check('profile_id', "client_id = 'profile'"),
+        check('training_background', 'length(training_background) <= 2000'),
+        check('days_per_week', 'days_per_week BETWEEN 1 AND 7'),
+        check('exercise_preferences', 'length(exercise_preferences) <= 2000'),
+        check('limitations', 'length(limitations) <= 2000'),
         check('goals', 'length(goals) <= 2000'), check('session_minutes', 'session_minutes BETWEEN 10 AND 180'),
         check('unit', "unit IN ('lb', 'kg')"),
         check('training_days', "training_days <@ ARRAY[0,1,2,3,4,5,6] AND array_position(training_days, NULL) IS NULL"),
@@ -91,7 +97,9 @@ training_plans = owned('training_plans', col('name', sa.Text), col('description'
 sa.Index('uq_training_plans_active', training_plans.c.user_id, unique=True,
          postgresql_where=sa.and_(training_plans.c.active, training_plans.c.deleted_at.is_(None)))
 planned_workouts = owned('planned_workouts', col('plan_pk', UUID(as_uuid=True)), ordered(), col('name', sa.Text),
+    col('duration_minutes', sa.Integer, True),
     parent='plan_pk', constraints=[link('plan_pk', 'training_plans', True), position_check(),
+        check('duration_minutes', 'duration_minutes BETWEEN 10 AND 180'),
         check('name', 'length(btrim(name)) BETWEEN 1 AND 100'), sa.UniqueConstraint('user_id', 'pk', 'plan_pk')])
 planned_workout_days = owned('planned_workout_days', col('workout_pk', UUID(as_uuid=True)), ordered(),
     col('day', sa.Integer), parent='workout_pk', constraints=[link('workout_pk', 'planned_workouts', True),

@@ -23,7 +23,7 @@ export function starterPlan(profile: Profile): Plan {
   const gym = profile.equipment.includes('Full gym');
   const bodyweight = profile.equipment.includes('Bodyweight') && !gym && !profile.equipment.includes('Dumbbells');
   const blocks = (ids: string[]) => ids.map(id => newBlock(`ex-${id}`));
-  const days = profile.trainingDays.length ? profile.trainingDays : [1, 3, 5];
+  const days = profile.trainingDays.length ? profile.trainingDays : [1, 3, 5, 2, 4, 6, 0].slice(0, profile.daysPerWeek ?? 3).sort((a, b) => a - b);
   return {
     id: uid(), name: 'Full body foundations', description: '', schedule: 'week', cursor: 0, revision: 0, active: false,
     workouts: [

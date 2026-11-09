@@ -1,3 +1,4 @@
+import { TrainingFields } from '../TrainingFields';
 import { useState, type FormEvent } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { ArrowLeft, ArrowRight, Check, Download, HardDrive, RefreshCw, ShieldCheck, Smartphone, Upload } from 'lucide-react';
@@ -5,7 +6,7 @@ import { Link } from 'react-router';
 import { backupSchema, profileSchema, type Backup, type Profile } from '../domain';
 import { db, exportBackup, importBackup, putLocalChange } from '../db';
 import { useApp } from '../state';
-import { Days, Modal, SectionTitle } from '../ui';
+import { Modal, SectionTitle } from '../ui';
 import { ConflictReview } from './ConflictReview';
 import { CoachMemorySettings } from '../coachContext';
 import { ChatGPTConnection } from './ChatGPTConnection';
@@ -15,22 +16,15 @@ function describeProfileValue(key: keyof Profile, value: Profile[keyof Profile])
   if (Array.isArray(value)) return value.map(item => key === 'trainingDays' ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][Number(item)] : item).join(', ') || 'None';
   if (key === 'sessionMinutes') return `${value} minutes`;
   if (key === 'unit') return value === 'kg' ? 'Kilograms' : 'Pounds';
-  return String(value) || 'Not set';
+  return value == null ? 'Not set' : String(value) || 'Not set';
 }
 
-function TrainingFields({ value, onChange }: { value: Profile; onChange: (profile: Profile) => void }) {
-  return <><label>What are you working toward?<textarea value={value.goals} maxLength={2000} rows={3} placeholder="Build muscle, get stronger, feel more consistent…" onChange={e => onChange({ ...value, goals: e.target.value })} /></label>
-    <div className="form-grid"><label>Training experience<select value={value.experience} onChange={e => onChange({ ...value, experience: e.target.value })}><option>Beginner</option><option>Intermediate</option><option>Experienced</option><option>Prefer not to say</option></select></label><label>Session length<select value={value.sessionMinutes} onChange={e => onChange({ ...value, sessionMinutes: Number(e.target.value) })}>{[20, 30, 45, 60, 90].map(minutes => <option key={minutes} value={minutes}>{minutes} minutes</option>)}</select></label></div>
-    <fieldset><legend>Available equipment</legend><div className="chip-row">{['Full gym', 'Dumbbells', 'Bodyweight'].map(item => <button type="button" className={`chip ${value.equipment.includes(item) ? 'selected' : ''}`} key={item} aria-pressed={value.equipment.includes(item)} onClick={() => onChange({ ...value, equipment: value.equipment.includes(item) ? value.equipment.filter(e => e !== item) : [...value.equipment, item] })}>{value.equipment.includes(item) && <Check size={13} />}{item}</button>)}</div></fieldset>
-    <fieldset><legend>Days that usually work for you</legend><Days value={value.trainingDays} onChange={trainingDays => onChange({ ...value, trainingDays })} /></fieldset>
-    <label>Weight unit<select value={value.unit} onChange={e => onChange({ ...value, unit: e.target.value as Profile['unit'] })}><option value="lb">Pounds (lb)</option><option value="kg">Kilograms (kg)</option></select></label></>;
-}
 
 export function Onboarding() {
   const { profile, run } = useApp(); const [step, setStep] = useState(0); const [draft, setDraft] = useState(profile);
   const save = () => run(() => putLocalChange('profile', { ...draft, onboardingDone: true }, db.profile));
   return <Modal title="Welcome to your training space" onClose={() => run(() => putLocalChange('profile', { ...profile, onboardingDone: true }, db.profile)).then(() => undefined)}><div className="onboarding-progress"><span className={step === 0 ? 'selected' : ''} /><span className={step === 1 ? 'selected' : ''} /></div>
-    {step === 0 ? <div className="onboarding-intro"><span className="brand-mark large">f.</span><h2>Set up your training profile</h2><p>Choose your equipment, training days, and weight unit. You can start logging offline after setup.</p><button className="button primary" onClick={() => setStep(1)}>Set up my profile<ArrowRight size={18} /></button></div> : <form onSubmit={e => { e.preventDefault(); void save(); }}><TrainingFields value={draft} onChange={setDraft} /><button className="button primary" type="submit">Let’s get started<ArrowRight size={18} /></button></form>}
+    {step === 0 ? <div className="onboarding-intro"><span className="brand-mark large">f.</span><h2>Set up your training profile</h2><p>Set your goals, usual availability, equipment, and weight unit. You can start logging offline after setup.</p><button className="button primary" onClick={() => setStep(1)}>Set up my profile<ArrowRight size={18} /></button></div> : <form onSubmit={e => { e.preventDefault(); void save(); }}><TrainingFields value={draft} onChange={setDraft} /><button className="button primary" type="submit">Let’s get started<ArrowRight size={18} /></button></form>}
     <button className="text-button onboarding-skip" onClick={() => run(() => putLocalChange('profile', { ...profile, onboardingDone: true }, db.profile))}>Skip for now</button><p className="field-hint centered">You can change these details anytime in Settings.</p>
   </Modal>;
 }
@@ -56,7 +50,7 @@ export function Settings() {
   const recoveries = syncRecords.filter(item => item.kind === 'recovery');
   const syncState = syncRecords.find(item => item.kind === 'state');
   const save = async (e: FormEvent) => {
-    e.preventDefault(); if (saving || changedElsewhere) return;
+    e.preventDefault(); if (!dirty || saving || changedElsewhere) return;
     setSaving(true);
     const database = db;
     const saved = profileSchema.parse({ ...draft, onboardingDone: true });
@@ -78,9 +72,9 @@ export function Settings() {
   };
   return <div className="page settings-page"><Link to="/" className="text-button"><ArrowLeft size={17} />Back to Today</Link><div className="page-heading compact-heading"><h1>Settings</h1><p>Profile, connections, and saved data.</p></div>
     <nav className="settings-links" aria-label="Settings sections"><a href="#training-profile">Training profile</a><a href="#sync-settings">Sync & backups</a><a href="#coach-connection">ChatGPT</a><a href="#coach-memory">Coach memory</a><a href="#install-app">Install app</a></nav>
-    <form id="training-profile" className="settings-card" onSubmit={save}><SectionTitle title="Training profile" /><p className="save-status" role={dirty || saving ? 'status' : undefined}>{saving ? 'Saving on this device…' : dirty ? durable ? 'Draft kept on this device. Choose Save profile to apply changes.' : 'Draft kept while this app is open. Save before closing it.' : 'Profile saved on this device'}</p>
-      {changedElsewhere && <div className="form-error"><p>Your saved profile changed while you were editing. Your draft is kept.</p><details><summary>Compare saved profile and draft</summary><dl>{(['goals', 'experience', 'equipment', 'trainingDays', 'sessionMinutes', 'unit'] as const).filter(key => JSON.stringify(profile[key]) !== JSON.stringify(draft[key])).map(key => <div key={key}><dt>{({ goals: 'Goals', experience: 'Experience', equipment: 'Equipment', trainingDays: 'Training days', sessionMinutes: 'Session minutes', unit: 'Weight unit' })[key]}</dt><dd>Saved: {describeProfileValue(key, profile[key])}<br />Draft: {describeProfileValue(key, draft[key])}</dd></div>)}</dl></details><button type="button" className="button secondary" onClick={keepDraft}>Keep draft values</button><button type="button" className="text-button" onClick={() => reset(profile)}>Use saved profile</button></div>}
-      <TrainingFields value={draft} onChange={setDraft} /><button className="button primary" disabled={saving || changedElsewhere} type="submit">{saving ? 'Saving…' : 'Save profile'}<Check size={18} /></button></form>
+    <form id="training-profile" className="settings-card" onSubmit={save}><SectionTitle title="Training profile" /><p className="save-status" role={dirty || saving ? 'status' : undefined}>{saving ? 'Saving on this device…' : dirty ? durable ? 'Draft kept on this device. Choose Save changes to apply changes.' : 'Draft kept while this app is open. Save before closing it.' : 'Profile saved on this device'}</p>
+      {changedElsewhere && <div className="form-error"><p>Your saved profile changed while you were editing. Your draft is kept.</p><details><summary>Compare saved profile and draft</summary><dl>{(['goals', 'experience', 'trainingBackground', 'equipment', 'daysPerWeek', 'trainingDays', 'exercisePreferences', 'limitations', 'unit'] as const).filter(key => JSON.stringify(profile[key]) !== JSON.stringify(draft[key])).map(key => <div key={key}><dt>{({ goals: 'Goals', experience: 'Experience', trainingBackground: 'Training background', equipment: 'Equipment', daysPerWeek: 'Days per week', trainingDays: 'Preferred days', exercisePreferences: 'Exercise preferences', limitations: 'Limitations', unit: 'Weight unit' })[key]}</dt><dd>Saved: {describeProfileValue(key, profile[key])}<br />Draft: {describeProfileValue(key, draft[key])}</dd></div>)}</dl></details><button type="button" className="button secondary" onClick={keepDraft}>Keep draft values</button><button type="button" className="text-button" onClick={() => reset(profile)}>Use saved profile</button></div>}
+      <TrainingFields value={draft} onChange={setDraft} />{(dirty || saving) && <button className="button primary" disabled={saving || changedElsewhere} type="submit">{saving ? 'Saving…' : 'Save changes'}<Check size={18} /></button>}</form>
     <section id="sync-settings" className="settings-card"><SectionTitle title="Synchronization"><HardDrive size={20} /></SectionTitle><div className="privacy-note"><ShieldCheck size={20} /><p>Every change saves on this device first. When you’re online and signed in, your plans and workouts sync to your account. Export a backup before changing phones or clearing browser data.</p></div>
       <p role="status">{failed.length ? `${failed.length} change${failed.length === 1 ? '' : 's'} failed to upload.` : conflicts.length ? `${conflicts.length} conflict${conflicts.length === 1 ? '' : 's'} need your choice.` : pendingSync.length ? `${pendingSync.length} change${pendingSync.length === 1 ? '' : 's'} pending upload.` : 'All changes are synchronized.'}</p>
       <p className="field-hint">{syncState?.updatedAt ? `Last sync activity: ${new Date(syncState.updatedAt).toLocaleString()}` : 'This account has not synchronized on this device yet.'}</p>

@@ -33,6 +33,10 @@ class Profile(Document):
     equipment: list[str]
     trainingDays: list[Day]
     sessionMinutes: int = Field(strict=True, ge=10, le=180)
+    trainingBackground: str | None = Field(default=None, max_length=2000)
+    daysPerWeek: int | None = Field(default=None, strict=True, ge=1, le=7)
+    exercisePreferences: str | None = Field(default=None, max_length=2000)
+    limitations: str | None = Field(default=None, max_length=2000)
     unit: Literal['lb', 'kg']
     onboardingDone: bool = Field(strict=True)
 
@@ -76,6 +80,7 @@ class Workout(Document):
     id: ID
     name: Name
     days: list[Day]
+    durationMinutes: int | None = Field(default=None, strict=True, ge=10, le=180)
     blocks: list[Block] = Field(min_length=1, max_length=50)
     _trim = field_validator('name', mode='before')(Exercise.trim.__func__)
 

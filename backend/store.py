@@ -17,6 +17,9 @@ else:
     from database import lock_user_mutations
     from domain import Plan, Session
 
+PROFILE_PREFERENCES = {'trainingBackground': 'training_background', 'daysPerWeek': 'days_per_week',
+                       'exercisePreferences': 'exercise_preferences', 'limitations': 'limitations'}
+
 RESOURCES = {'exercises': s.exercises, 'plans': s.training_plans,
              'sessions': s.workout_sessions, 'schedule-overrides': s.schedule_overrides,
              'profile': s.profiles, 'catalog': s.exercise_catalog}
@@ -233,6 +236,9 @@ class Store:
             values = dict(goals=item.goals, experience=item.experience, equipment=item.equipment,
                 training_days=item.trainingDays, session_minutes=item.sessionMinutes, unit=item.unit,
                 onboarding_done=item.onboardingDone)
+            # Older clients omit these fields; preserve saved preferences on their writes.
+            values.update({column: getattr(item, field) for field, column in PROFILE_PREFERENCES.items()
+                           if field in item.model_fields_set})
         elif resource == 'exercises':
             catalog = await self.root(s.exercise_catalog, item.id)
             values = dict(name=item.name, muscle=item.muscle, equipment=item.equipment,
@@ -271,7 +277,10 @@ class Store:
         row = await self.save_root(table, item.id, values, old)
         if resource == 'plans':
             workouts = await self.reconcile(s.planned_workouts, 'plan_pk', row['pk'],
-                                           [(workout.id, dict(name=workout.name)) for workout in item.workouts])
+                                           [(workout.id, dict(name=workout.name, **(
+                                               {'duration_minutes': workout.durationMinutes}
+                                               if 'durationMinutes' in workout.model_fields_set else {})))
+                                            for workout in item.workouts])
             for workout, stored in zip(item.workouts, workouts):
                 prior_days = await self.rows(s.planned_workout_days,
                     s.planned_workout_days.c.workout_pk == stored['pk'], order=[s.planned_workout_days.c.position])
@@ -369,7 +378,8 @@ class Store:
         if resource == 'profile':
             return [dict(id='profile', goals=r['goals'], experience=r['experience'], equipment=r['equipment'],
                 trainingDays=r['training_days'], sessionMinutes=r['session_minutes'], unit=r['unit'],
-                onboardingDone=r['onboarding_done']) for r in rows]
+                onboardingDone=r['onboarding_done'],
+                **{field: r[column] for field, column in PROFILE_PREFERENCES.items() if r[column] is not None}) for r in rows]
         if resource == 'schedule-overrides':
             plans = {r['pk']: r['client_id'] for r in await self.rows(s.training_plans,
                 s.training_plans.c.pk.in_([r['plan_pk'] for r in rows]), live=False)}
@@ -388,6 +398,7 @@ class Store:
                 s.exercises.c.pk.in_([b['exercise_pk'] for b in all_blocks]), live=False)}
             return [dict(id=r['client_id'], name=r['name'], description=r['description'], schedule=r['schedule'], cursor=r['cursor'],
                 revision=r['revision'], active=r['active'], workouts=[dict(id=w['client_id'], name=w['name'],
+                    **({'durationMinutes': w['duration_minutes']} if w['duration_minutes'] is not None else {}),
                     days=[d['day'] for d in days[w['pk']]], blocks=[dict(id=b['client_id'],
                         exerciseId=exercises[b['exercise_pk']], restSeconds=b['rest_seconds'],
                         supersetId=b['superset_id'], sets=[set_document(x) for x in sets[b['pk']]])

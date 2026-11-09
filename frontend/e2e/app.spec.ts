@@ -131,9 +131,17 @@ test('empty history, onboarding editing, responsive layout and navigation', asyn
   await expect(page.getByText('No completed workouts yet')).toBeVisible();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page.getByLabel('What are you working toward?')).toHaveValue('Build strength and train consistently');
-  await page.getByRole('combobox', { name: 'Weight unit', exact: true }).selectOption('kg');
-  await page.getByRole('button', { name: 'Save profile' }).click();
+  const saveChanges = page.getByRole('button', { name: 'Save changes', exact: true });
+  await expect(saveChanges).toHaveCount(0);
+  const unit = page.getByRole('combobox', { name: 'Weight unit', exact: true });
+  await unit.selectOption('kg');
+  await expect(saveChanges).toBeVisible();
+  await unit.selectOption('lb');
+  await expect(saveChanges).toHaveCount(0);
+  await unit.selectOption('kg');
+  await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Profile saved' })).toBeVisible();
+  await expect(saveChanges).toHaveCount(0);
   await page.reload(); await expect(page.getByRole('combobox', { name: 'Weight unit', exact: true })).toHaveValue('kg');
   await page.getByRole('link', { name: 'FitCoach home' }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -188,6 +196,92 @@ test('sample Coach proposal is editable and only saved after Apply', async ({ pa
 
 test.describe('persistent Coach conversations', () => {
 test.use({ serviceWorkers: 'block' });
+
+test('Coach renders rich replies safely on phones and preserves diagram source', async ({ page, context }, info) => {
+  if (info.project.name.startsWith('phone')) await page.setViewportSize({ width: 375, height: 812 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  mockConversations(context);
+  let imageRequests = 0;
+  await context.route('https://images.example.com/**', route => { imageRequests++; return route.abort(); });
+  const reply = [
+    '## Training overview',
+    'A simple progression with a recovery day.',
+    '```mermaid\nflowchart LR\n  A[Train] --> B[Recover]\n  B --> C[Repeat]\n```',
+    '```mermaid\nsequenceDiagram\n  Athlete->>Coach: Log workout\n  Coach-->>Athlete: Review progress\n```',
+    '```mermaid\npie title Weekly sessions\n  "Strength" : 3\n  "Recovery" : 2\n```',
+    '```mermaid\nxychart-beta\n  x-axis [Mon, Wed, Fri]\n  y-axis "Sets" 0 --> 20\n  bar [10, 12, 14]\n```',
+    '```mermaid\nmindmap\n  root((Training))\n    Strength\n    Recovery\n```',
+    '| Day | Goal |\n| --- | --- |\n| Monday | Strength |',
+    '- [x] Warm up\n- [ ] Log sets',
+    'Estimated volume: $V = sets \\times reps$.',
+    '$$\nV = 3 \\times 8 = 24\n$$',
+    '```python\nprint("training")\n```',
+    '```unknown-language\nplain code survives\n```',
+    'Reference[^1].\n\n[^1]: Your recorded training notes.',
+    '[Training reference](https://example.com/training)',
+    '[Unsafe link](javascript:alert(1))',
+    '<script>window.coachUnsafe = true</script>',
+    '![Exercise illustration](https://images.example.com/exercise.png)',
+    '```mermaid\nthis is not a valid diagram\n```',
+    '```mermaid\n%%{init: {"securityLevel": "loose"}}%%\nflowchart LR\nA --> B\n```',
+  ].join('\n\n');
+  await context.route('https://api.example.com/v1/chatgpt/**', route => route.fulfill({
+    json: route.request().url().endsWith('/coach') ? { text: reply, messageId: 'rich-reply', userMessageId: 'rich-user' }
+      : { connected: true, planUsageGranted: true },
+    headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173', 'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' },
+  }));
+  await openApp(page); await openCoach(page);
+  await expect(page.getByRole('button', { name: 'Chats', exact: true })).toBeVisible();
+  await page.getByLabel('Message Coach').fill('Show a diagram and common reply formats.');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  const replyElement = page.locator('.message.assistant').last();
+  await expect(replyElement.getByRole('heading', { name: 'Training overview' })).toBeVisible();
+  const preview = replyElement.locator('.coach-diagram-scroll img');
+  await expect(preview).toHaveCount(5);
+  for (const image of await preview.all()) {
+    await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+    const labels = await image.evaluate((img: HTMLImageElement) => {
+      const svg = new DOMParser().parseFromString(decodeURIComponent(img.src.split(',')[1]), 'image/svg+xml');
+      return Array.from(svg.querySelectorAll('text')).map(text => text.textContent).join(' ');
+    });
+    expect(labels.trim().length).toBeGreaterThan(0);
+  }
+  await expect(replyElement.locator('.katex')).toHaveCount(2);
+  await expect(replyElement.locator('.hljs-built_in')).toContainText('print');
+  await expect(replyElement.getByRole('cell', { name: 'Strength', exact: true })).toHaveCount(1);
+  await expect(replyElement.getByRole('checkbox')).toHaveCount(2);
+  await expect(replyElement.locator('.footnotes')).toContainText('Your recorded training notes.');
+  const footnote = replyElement.locator('a[data-footnote-ref]');
+  const footnoteTarget = await footnote.getAttribute('href');
+  expect(await page.locator(`[id="${footnoteTarget!.slice(1)}"]`).count()).toBe(1);
+  await expect(replyElement.getByRole('link', { name: 'Training reference' })).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(replyElement.locator('a[href^="javascript:"]')).toHaveCount(0);
+  expect(await page.evaluate(() => 'coachUnsafe' in window)).toBe(false);
+  await expect(replyElement.getByText('This diagram could not be rendered. The source is preserved below.')).toHaveCount(2);
+  await expect(replyElement.locator('pre').filter({ hasText: 'plain code survives' })).toHaveCount(1);
+  expect(imageRequests).toBe(0);
+  await expect(replyElement.getByRole('button', { name: 'Load image: Exercise illustration' })).toHaveCount(1);
+  const diagram = replyElement.locator('.coach-diagram').first();
+  await diagram.scrollIntoViewIfNeeded();
+  await diagram.getByRole('button', { name: 'Zoom in diagram' }).click();
+  await expect(diagram.getByText('150%')).toBeVisible();
+  const download = page.waitForEvent('download');
+  await diagram.getByRole('link', { name: 'Save SVG' }).click();
+  expect((await download).suggestedFilename()).toBe('coach-diagram.svg');
+  await diagram.getByText('Diagram source', { exact: true }).click();
+  await expect(diagram.locator('pre')).toContainText('A[Train]');
+  await replyElement.getByRole('button', { name: 'Copy reply', exact: true }).click();
+  await expect(replyElement.getByRole('status').filter({ hasText: /Copied|Copy unavailable/ })).toHaveCount(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await diagram.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath('coach-rich-content.png') });
+  if (info.project.name.startsWith('phone')) {
+    await page.setViewportSize({ width: 812, height: 375 });
+    await diagram.scrollIntoViewIfNeeded();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: info.outputPath('coach-rich-content-landscape.png') });
+  }
+});
 
 test('connected Coach sends through the API and labels the saved reply', async ({ page, context }) => {
   const calls: unknown[] = [];
@@ -351,6 +445,8 @@ test('custom exercise, superset flow and durable rest timer', async ({ page }) =
   await custom.getByLabel('Name', { exact: true }).fill('Cable chest press');
   await custom.getByLabel('Muscle group', { exact: true }).fill('Chest');
   await custom.getByRole('button', { name: 'Save exercise', exact: true }).click();
+  await expect(custom).toHaveCount(0);
+  await expect(page.locator('.editor-block')).toHaveCount(2);
   for (const options of await page.locator('.advanced-prescription > summary').all()) await options.click();
   const groups = page.getByRole('combobox', { name: 'Superset group', exact: true });
   await groups.nth(0).selectOption('superset-A'); await groups.nth(1).selectOption('superset-A');
@@ -457,7 +553,7 @@ test('conflict review shows both versions and queues a manual result', async ({ 
   await expect(review.locator('.conflict-version').last()).toContainText('Cloud goal');
   await review.getByRole('button', { name: 'Edit and merge' }).click();
   await review.getByRole('button', { name: 'Use cloud value' }).first().click();
-  await review.getByRole('textbox', { name: 'Goals', exact: true }).fill('Combined goal');
+  await review.getByRole('textbox', { name: 'What are you working toward?', exact: true }).fill('Combined goal');
   await review.getByRole('button', { name: 'Save and upload final version' }).click();
   await expect(review).toHaveCount(0);
   await expect(page.locator('.sync-resolutions')).toContainText('Pending upload');
@@ -924,10 +1020,10 @@ test('profile drafts survive navigation and reload without overwriting a changed
     };
   }));
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Save profile', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeDisabled();
   await expect(page.getByLabel('What are you working toward?')).toHaveValue('Retained draft goal');
   await page.getByRole('button', { name: 'Keep draft values', exact: true }).click();
-  await page.getByRole('button', { name: 'Save profile', exact: true }).click();
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Profile saved on this device' }).first()).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('What are you working toward?')).toHaveValue('Retained draft goal');
@@ -1084,6 +1180,13 @@ async function readPlans(page: Page) {
   }));
 }
 
+async function waitForOfflineInstall(page: Page) {
+  // A fresh browser context must finish precaching before an offline reload.
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.ready;
+  });
+}
+
 test('workout choice starts Upper offline out of rotation and offers another session', async ({ page, context }) => {
   await openApp(page); await makePlan(page);
   await openMainPage(page, 'Plan');
@@ -1097,6 +1200,7 @@ test('workout choice starts Upper offline out of rotation and offers another ses
   await page.getByRole('link', { name: 'Today', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Push', exact: true })).toBeVisible();
   const before = await readPlans(page);
+  await waitForOfflineInstall(page);
   await context.setOffline(true);
   const library = page.getByRole('region', { name: 'Your routines', exact: true });
   await expectUsable(page, library.getByRole('button', { name: 'Start Upper from My strength plan', exact: true }));
@@ -1161,6 +1265,7 @@ test('Today lists current-plan routines first and starts saved-plan blueprints w
   const before = await readPlans(page);
   const source = JSON.parse(before).find((plan: { name: string }) => plan.name === 'Other routines');
   expect(source.active).toBe(false);
+  await waitForOfflineInstall(page);
   await context.setOffline(true);
   await page.getByRole('button', { name: 'Start Full upper from Other routines', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Full upper', exact: true })).toBeVisible();
@@ -1233,5 +1338,59 @@ test('finishing an accidental workout offers discard and retains an uncompleted 
     };
   }));
   expect(remaining).toEqual({ sessions: 0, recoveries: 1, mutations: 0 });
+  await context.setOffline(false);
+});
+
+test('training preferences persist offline and each workout owns its duration target', async ({ page, context }, info) => {
+  await openApp(page);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.getByLabel('Session length', { exact: true })).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Training background (optional)', exact: true }).fill('Returning after a year away');
+  await page.getByRole('combobox', { name: 'Usual training days per week (optional)', exact: true }).selectOption('4');
+  await page.getByText('Exercise preferences & limitations (optional)', { exact: true }).click();
+  await page.getByRole('textbox', { name: 'Exercise preferences', exact: true }).fill('Prefer dumbbells and cables');
+  await page.getByRole('textbox', { name: 'Limitations or alternatives needed', exact: true }).fill('Prefer alternatives to overhead pressing');
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await expect(page.locator('#training-profile .save-status')).toHaveText('Profile saved on this device');
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: 'Training background (optional)', exact: true })).toHaveValue('Returning after a year away');
+  await expect(page.getByRole('combobox', { name: 'Usual training days per week (optional)', exact: true })).toHaveValue('4');
+  await page.getByText('Exercise preferences & limitations (optional)', { exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Exercise preferences', exact: true })).toHaveValue('Prefer dumbbells and cables');
+  await expect(page.getByRole('textbox', { name: 'Limitations or alternatives needed', exact: true })).toHaveValue('Prefer alternatives to overhead pressing');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const originalViewport = page.viewportSize()!;
+  for (const viewport of [{ width: 375, height: 812 }, { width: 812, height: 375 }]) {
+    await page.setViewportSize(viewport);
+    expect(await page.locator('#main-content').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  }
+  await page.setViewportSize(originalViewport);
+  await page.screenshot({ path: info.outputPath('training-profile.png'), fullPage: true });
+
+  await makePlan(page);
+  await expect(page.getByText(/45 min target/)).toHaveCount(0);
+  await openMainPage(page, 'Plan');
+  await page.getByRole('button', { name: 'Edit plan', exact: true }).click();
+  const duration = page.getByLabel('Workout duration target (minutes, optional)', { exact: true });
+  await duration.fill('35');
+  await page.getByRole('button', { name: 'Duplicate workout', exact: true }).click();
+  await page.getByLabel('Workout name', { exact: true }).fill('Upper body');
+  await duration.fill('70');
+  await page.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await expect(page.getByText('1 exercises · 35 min target', { exact: true })).toBeVisible();
+  await expect(page.getByText('1 exercises · 70 min target', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await expect(page.locator('.hero-meta').getByText('35 min target', { exact: true })).toBeVisible();
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.locator('.hero-meta').getByText('35 min target', { exact: true })).toBeVisible();
+  await openMainPage(page, 'Plan');
+  await page.getByRole('button', { name: 'Edit plan', exact: true }).click();
+  await expect(duration).toHaveValue('35');
+  await duration.fill('');
+  await page.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await expect(page.locator('.hero-meta')).not.toContainText('min target');
+  await page.screenshot({ path: info.outputPath('workout-duration.png'), fullPage: true });
   await context.setOffline(false);
 });
