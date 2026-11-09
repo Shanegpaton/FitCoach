@@ -8,6 +8,7 @@ import { finishSession } from '../db';
 import { updateSession, useApp } from '../state';
 import { ExercisePicker } from './Plans';
 import { Empty, Modal } from '../ui';
+import { SessionTiming } from '../SessionTiming';
 
 let audio: AudioContext | undefined;
 function unlockAudio() {
@@ -87,6 +88,7 @@ export function WorkoutPage({ syncLabel }: { syncLabel: string }) {
     {!active && <div className="action-row"><button className="button secondary" onClick={() => setEditing(!editing)}>{editing ? <Check size={16} /> : <Pencil size={16} />}{editing ? 'Done editing' : 'Edit log'}</button><span className="small-muted">{stats.sets} working sets · {Math.round(Number(formatLoad(stats.volumeKg, profile.unit))).toLocaleString()} {profile.unit} volume</span></div>}
     <p className="field-hint">{active ? 'Enter actual weight and reps, then check off each set.' : editing ? 'Changes save as you edit. Done editing returns to the read-only log.' : 'A snapshot of the workout you completed.'}</p>
     {editable && <p className={`save-status ${saveStatus === 'error' ? 'danger' : ''}`} role="status">{saveStatus === 'saving' ? 'Saving on this device…' : saveStatus === 'error' ? 'A change could not be saved. Check the error and retry.' : 'Saved on this device'}</p>}
+    <SessionTiming session={session} />
     <div className="logging-blocks">{session.blocks.map((block, bi) => {
       const previous = lastPerformance(sessions.filter(s => s.id !== session.id), block.exerciseId);
       const expandedHere = expanded === bi;

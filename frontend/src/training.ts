@@ -36,6 +36,17 @@ export function completedStats(session: Session) {
   return { sets: sets.length, volumeKg: sets.reduce((total, set) => total + (set.kg ?? 0) * (set.reps ?? 0), 0) };
 }
 
+export function sessionDuration(session: Pick<Session, 'startedAt' | 'completedAt' | 'status'>, now = Date.now()) {
+  const end = session.status === 'completed' ? Date.parse(session.completedAt ?? '') : now;
+  const elapsed = end - Date.parse(session.startedAt);
+  if (!Number.isFinite(elapsed) || elapsed < 0) return 'Unavailable';
+  const minutes = Math.floor(elapsed / 60000);
+  if (minutes === 0) return '<1 min';
+  if (minutes < 60) return `${minutes} min`;
+  const remainder = minutes % 60;
+  return `${Math.floor(minutes / 60)} hr${remainder ? ` ${remainder} min` : ''}`;
+}
+
 export function timerRemaining(timer: Timer, now = Date.now()) {
   return timer.endAt === null ? timer.remaining : Math.max(0, Math.ceil((timer.endAt - now) / 1000));
 }

@@ -695,3 +695,8 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 .routine-start { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; font-size: 14px; color: var(--accent); }
 
 .profile-preferences summary { cursor: pointer; min-height: 44px; padding: 12px 0; color: var(--muted); }
+
+.session-timing { display: flex; flex-wrap: wrap; gap: 16px 24px; padding: 16px 0; margin: 0 0 16px; border-bottom: 1px solid var(--border); }
+.session-timing > div { flex: 1 1 140px; min-width: 0; }
+.session-timing dt { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+.session-timing dd { margin: 0; font-size: 16px; line-height: 1.5; font-variant-numeric: tabular-nums; }

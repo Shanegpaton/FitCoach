@@ -155,9 +155,13 @@ test('manual plan, advanced set tools, offline logging, reload recovery and real
   await page.getByRole('button', { name: 'Start workout', exact: true }).click();
   await expect(page).toHaveURL(/\/workout\//);
   await expect(page.getByRole('heading', { name: 'Strength A', exact: true })).toBeVisible();
+  const timing = page.locator('dl[aria-label="Workout timing"]');
+  await expect(timing).toContainText('Elapsed');
+  const startedAt = await timing.locator('time').getAttribute('datetime');
   await page.evaluate(async () => { await navigator.serviceWorker.ready; });
   await page.reload();
   await expect(page.getByRole('spinbutton', { name: 'Weight set 1 Barbell squat' })).toBeVisible();
+  await expect(timing.locator('time')).toHaveAttribute('datetime', startedAt!);
   await context.setOffline(true);
   await logSet(page, 1, '100', '8');
   await page.getByRole('button', { name: 'Drop set', exact: true }).click();
@@ -176,6 +180,14 @@ test('manual plan, advanced set tools, offline logging, reload recovery and real
   await expect(page.getByText('100 lb best external load')).toBeVisible();
   await page.screenshot({ path: info.outputPath('history.png'), fullPage: true });
   await page.reload(); await expect(page.getByRole('link', { name: /Strength A/ })).toBeVisible();
+  await page.getByRole('link', { name: /Strength A/ }).click();
+  await expect(timing).toContainText('Duration');
+  await expect(timing).not.toContainText('In progress');
+  await expect(timing.locator('time').first()).toHaveAttribute('datetime', startedAt!);
+  const finishedAt = await timing.locator('time').last().getAttribute('datetime');
+  expect(Date.parse(finishedAt!)).toBeGreaterThanOrEqual(Date.parse(startedAt!));
+  await page.reload();
+  await expect(timing.locator('time').last()).toHaveAttribute('datetime', finishedAt!);
   await context.setOffline(false);
   expect(errors).toEqual([]);
 });

@@ -3,7 +3,7 @@ import { ArrowUpRight, CalendarDays, ChevronDown, Dumbbell, TrendingUp, Trophy }
 import { Link } from 'react-router';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { atNoon, formatLoad, fromKg } from '../domain';
-import { completedStats, weeklyStats } from '../training';
+import { completedStats, sessionDuration, weeklyStats } from '../training';
 import { useApp } from '../state';
 import { Empty, Modal, SectionTitle } from '../ui';
 
@@ -19,7 +19,7 @@ export function History() {
   const filtered = completed.filter(session => `${session.name} ${session.date} ${session.blocks.map(block => block.name).join(' ')}`.toLowerCase().includes(query.trim().toLowerCase()));
   const sessionRow = (session: typeof completed[number]) => {
     const stats = completedStats(session);
-    return <Link className="history-row" key={session.id} to={`/workout/${session.id}`}><span className="history-date"><strong>{atNoon(session.date).getDate()}</strong><small>{atNoon(session.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</small></span><div><strong>{session.name}</strong><small>{stats.sets} working sets · {session.blocks.length} exercises</small></div><ArrowUpRight size={19} /></Link>;
+    return <Link className="history-row" key={session.id} to={`/workout/${session.id}`}><span className="history-date"><strong>{atNoon(session.date).getDate()}</strong><small>{atNoon(session.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</small></span><div><strong>{session.name}</strong><small>{stats.sets} working sets · {session.blocks.length} exercises · {sessionDuration(session)}</small></div><ArrowUpRight size={19} /></Link>;
   };
   const exercisedIds = new Set(completed.flatMap(s => s.blocks.filter(b => b.sets.some(set => set.done)).map(b => b.exerciseId)));
   const trackedExercises = [...exercisedIds].map(id => ({ id, name: exercises.find(e => e.id === id)?.name ?? completed.flatMap(s => s.blocks).find(b => b.exerciseId === id)?.name ?? 'Exercise' }));

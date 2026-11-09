@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { catalog, starterPlan } from './catalog';
 import { defaultProfile, toKg, fromKg, newSet } from './domain';
-import { completedStats, lastPerformance, nextSet, planWorkoutForDate, restAfterSet, scheduledWorkout, startSession, timerRemaining, weeklyStats } from './training';
+import { completedStats, lastPerformance, nextSet, planWorkoutForDate, restAfterSet, scheduledWorkout, sessionDuration, startSession, timerRemaining, weeklyStats } from './training';
 
 describe('workout scheduling and snapshots', () => {
   it('schedules weekdays without silently making a rest day a training day', () => {
@@ -111,5 +111,22 @@ describe('history and units', () => {
     const active = startSession(p, p.workouts[0], catalog, '2026-10-13');
     const weeks = weeklyStats([s, active], 2, new Date('2026-10-14T12:00:00'));
     expect(weeks[0].workouts).toBe(0); expect(weeks[1]).toMatchObject({ date: '2026-10-12', workouts: 1, sets: 1, volumeKg: 100 });
+  });
+});
+
+describe('workout elapsed time', () => {
+  const session = { startedAt: '2026-10-12T23:30:00Z', completedAt: null as string | null, status: 'active' as 'active' | 'completed' };
+  it('uses actual timestamps across midnight and time away from the app', () => {
+    expect(sessionDuration(session, Date.parse('2026-10-13T00:45:00Z'))).toBe('1 hr 15 min');
+    expect(sessionDuration(session, Date.parse('2026-10-12T23:30:59Z'))).toBe('<1 min');
+    expect(sessionDuration(session, Date.parse('2026-10-12T23:31:00Z'))).toBe('1 min');
+    expect(sessionDuration(session, Date.parse('2026-10-13T00:30:00Z'))).toBe('1 hr');
+  });
+  it('keeps completed duration fixed and accounts for timezone offsets', () => {
+    expect(sessionDuration({ ...session, status: 'completed', completedAt: '2026-10-12T21:00:00-04:00' }, 0)).toBe('1 hr 30 min');
+  });
+  it('does not invent a duration for missing or reversed timestamps', () => {
+    expect(sessionDuration({ ...session, status: 'completed' })).toBe('Unavailable');
+    expect(sessionDuration(session, Date.parse(session.startedAt) - 1)).toBe('Unavailable');
   });
 });

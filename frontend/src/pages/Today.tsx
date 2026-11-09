@@ -3,7 +3,7 @@ import { ArrowRight, ArrowUpRight, CalendarDays, Check, ChevronLeft, ChevronRigh
 import { Link, useNavigate } from 'react-router';
 import { createSession, db, putLocalChange } from '../db';
 import { atNoon, localDate, uid, weekdayNames, type Plan, type Workout } from '../domain';
-import { completedStats, planWorkoutForDate, scheduledWorkout, startSession, weeklyStats } from '../training';
+import { completedStats, planWorkoutForDate, scheduledWorkout, sessionDuration, startSession, weeklyStats } from '../training';
 import { useApp } from '../state';
 import { Empty, Modal, SectionTitle } from '../ui';
 
@@ -333,7 +333,7 @@ function HistoryPreview({ session }: { session: import('../domain').Session }) {
     <div>
       <span className="eyebrow">{atNoon(session.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
       <strong>{session.name}</strong>
-      <small>{completedStats(session).sets} working sets completed</small>
+      <small>{completedStats(session).sets} working sets · {sessionDuration(session)}</small>
     </div>
   );
 }
