@@ -45,3 +45,27 @@ it('also times out if authentication never finishes', async () => {
   await result;
   expect(fetch).not.toHaveBeenCalled();
 });
+
+it('renders streamed text before completion, resets tool-turn text, and returns persisted reply metadata', async () => {
+  const { readCoachStream } = await requests();
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  const response = new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }));
+  const updates: string[] = [];
+  const result = readCoachStream<{ text: string; messageId: string }>(response, text => updates.push(text));
+  const encoder = new TextEncoder();
+  stream.enqueue(encoder.encode('data: {"type":"delta","text":"Looking up your plan"}\n\ndata: {"type":"reset"}\n\n'));
+  await vi.waitFor(() => expect(updates).toEqual(['Looking up your plan', '']));
+  const frame = encoder.encode('data: {"type":"delta","text":"Let’s train"}\n\n');
+  const split = frame.indexOf(0xe2) + 1;
+  stream.enqueue(frame.slice(0, split));
+  stream.enqueue(frame.slice(split));
+  await vi.waitFor(() => expect(updates.at(-1)).toBe('Let’s train'));
+  stream.enqueue(encoder.encode('data: {"type":"completed","reply":{"text":"Let’s train today.","messageId":"saved"}}\n\n'));
+  await expect(result).resolves.toEqual({ text: 'Let’s train today.', messageId: 'saved' });
+});
+
+it('rejects interrupted and failed streams rather than treating partial text as a saved reply', async () => {
+  const { readCoachStream, BackendError } = await requests();
+  await expect(readCoachStream(new Response('data: {"type":"delta","text":"Partial"}\n\n'), () => {})).rejects.toThrow('interrupted');
+  await expect(readCoachStream(new Response('data: {"type":"error","status":429,"detail":"Usage limit"}\n\n'), () => {})).rejects.toEqual(new BackendError('Usage limit', 429));
+});

@@ -18,7 +18,7 @@ export type ServerProposal = ServerPlanProposal | ServerWorkoutProposal;
 export const isWorkoutProposal = (proposal: ServerProposal): proposal is ServerWorkoutProposal =>
   proposal.type === 'session_modify' || proposal.type === 'session_create';
 export interface ChatReply { text: string; proposal?: Plan; baseRevision?: number | null; serverProposal?: ServerProposal | null; persistedMessageId?: string; persistedUserMessageId?: string; replayed?: boolean }
-export interface ChatAdapter { respond(request: ChatRequest): Promise<ChatReply> }
+export interface ChatAdapter { respond(request: ChatRequest, onText?: (text: string) => void): Promise<ChatReply> }
 
 export const sampleCoach: ChatAdapter = {
   async respond({ messages, profile, plan }) {

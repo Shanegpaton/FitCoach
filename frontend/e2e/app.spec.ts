@@ -1394,3 +1394,45 @@ test('training preferences persist offline and each workout owns its duration ta
   await page.screenshot({ path: info.outputPath('workout-duration.png'), fullPage: true });
   await context.setOffline(false);
 });
+
+test('Coach shows the sent message immediately and streams the reply before completion', async ({ page, context }) => {
+  mockConversations(context);
+  await context.route('https://api.example.com/v1/chatgpt/**', route => route.fulfill({
+    json: { connected: true, planUsageGranted: true },
+    headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173' },
+  }));
+  await page.addInitScript(() => {
+    const original = window.fetch;
+    window.fetch = async (...args) => {
+      if (String(args[0]).endsWith('/v1/chatgpt/coach')) {
+        const encoder = new TextEncoder();
+        return new Response(new ReadableStream({ start(controller) {
+          document.documentElement.dataset.coachStreamReady = 'true';
+          const emit = (event: object) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          window.addEventListener('coach-test-delta', () => emit({ type: 'delta', text: 'Start with two' }), { once: true });
+          window.addEventListener('coach-test-complete', () => {
+            emit({ type: 'completed', reply: { text: 'Start with two training days.', messageId: 'saved-assistant', userMessageId: 'saved-user' } });
+            controller.close();
+          }, { once: true });
+        } }), { headers: { 'Content-Type': 'text/event-stream' } });
+      }
+      return original(...args);
+    };
+  });
+  await openApp(page); await openCoach(page);
+  await expect(page.getByRole('button', { name: 'Chats', exact: true })).toBeVisible();
+  await page.getByLabel('Message Coach').fill('How should I begin?');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(page.locator('.message.user')).toHaveText('How should I begin?');
+  await expect(page.getByLabel('Message Coach')).toHaveValue('');
+  await expect(page.getByLabel('Preparing Coach response')).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-coach-stream-ready', 'true');
+  await page.evaluate(() => window.dispatchEvent(new Event('coach-test-delta')));
+  await expect(page.locator('.message.assistant .message-markdown')).toHaveText('Start with two');
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeDisabled();
+  await page.evaluate(() => window.dispatchEvent(new Event('coach-test-complete')));
+  await expect(page.locator('.message.assistant .message-markdown')).toHaveText('Start with two training days.');
+  await expect(page.locator('.message.user')).toHaveCount(1);
+  await expect(page.locator('.message.assistant')).toHaveCount(1);
+  await expect(page.locator('.messages')).toHaveAttribute('aria-busy', 'false');
+});

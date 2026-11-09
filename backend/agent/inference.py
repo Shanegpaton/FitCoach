@@ -159,7 +159,7 @@ def agent_instructions(training_data_ready=True, _empty_retry=False):
 
 async def complete_agent_turn(access_token: str, input_items: list[dict], tools: list[dict],
                               training_data_ready: bool = True, *, _empty_retry: bool = False,
-                              budget: ModelBudget | None = None, instructions_override: str | None = None) -> dict:
+                              budget: ModelBudget | None = None, instructions_override: str | None = None, on_text=None) -> dict:
     """Return one completed model turn, including any function-call output items."""
     headers = {'Authorization': f'Bearer {access_token}'}
     try:
@@ -205,6 +205,8 @@ async def complete_agent_turn(access_token: str, input_items: list[dict], tools:
                         if isinstance(delta, str):
                             streamed_text.append(delta)
                             length += len(delta)
+                            if on_text and length <= 10000:
+                                await on_text(delta)
                         if length > 10000:
                             raise InferenceError(502, 'ChatGPT reply was too long. Try a shorter question.')
                     elif kind == 'response.refusal.delta':
@@ -212,6 +214,8 @@ async def complete_agent_turn(access_token: str, input_items: list[dict], tools:
                         if isinstance(delta, str):
                             streamed_text.append(delta)
                             length += len(delta)
+                            if on_text and length <= 10000:
+                                await on_text(delta)
                         if length > 10000:
                             raise InferenceError(502, 'ChatGPT reply was too long. Try a shorter question.')
                     elif kind == 'response.output_text.done' and isinstance(event.get('text'), str):
@@ -269,7 +273,7 @@ async def complete_agent_turn(access_token: str, input_items: list[dict], tools:
                     completed.get('id') if isinstance(completed, dict) else None)
                 if not _empty_retry:
                     return await complete_agent_turn(access_token, input_items, tools,
-                        training_data_ready, _empty_retry=True, budget=budget, instructions_override=instructions_override)
+                        training_data_ready, _empty_retry=True, budget=budget, instructions_override=instructions_override, on_text=on_text)
                 raise InferenceError(502, 'ChatGPT returned an unsupported reply. Try again.')
             return {'output': output, 'text': text}
     except InferenceError:

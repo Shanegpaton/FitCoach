@@ -190,3 +190,30 @@ async def test_agent_turn_rejects_incomplete_stream(monkeypatch):
     with pytest.raises(inference.InferenceError) as error:
         await inference.complete_agent_turn('secret-access', [{'role': 'user', 'content': 'Hi'}], [])
     assert error.value.status == 502
+
+
+@pytest.mark.asyncio
+async def test_agent_forwards_text_deltas_before_completion_without_tool_arguments(monkeypatch):
+    seen = []
+
+    async def on_text(text):
+        seen.append(text)
+
+    class Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'data: {"type":"response.function_call_arguments.delta","delta":"private tool arguments"}\n\n'
+            yield b'data: {"type":"response.output_text.delta","delta":"Train "}\n\n'
+            assert seen == ['Train ']
+            yield b'data: {"type":"response.output_text.delta","delta":"today."}\n\n'
+            assert seen == ['Train ', 'today.']
+            yield b'data: {"type":"response.completed","response":{"output":[]}}\n\n'
+
+    def respond(request):
+        if request.url.path == '/v1/models':
+            return httpx.Response(200, json={'models': [{'slug': 'available', 'visibility': 'list', 'context_window': 32000}]})
+        return httpx.Response(200, stream=Stream())
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(inference.httpx, 'AsyncClient', lambda **kwargs: real(transport=httpx.MockTransport(respond)))
+    reply = await inference.complete_agent_turn('secret', [{'role': 'user', 'content': 'Help'}], [], on_text=on_text)
+    assert reply['text'] == 'Train today.'

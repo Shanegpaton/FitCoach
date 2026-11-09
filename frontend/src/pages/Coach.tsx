@@ -92,6 +92,7 @@ export function CoachProvider({ children }: { children: ReactNode }) {
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [pendingMessages, setPendingMessages] = useState<{ scope: string; messages: Message[] } | null>(null);
   const [mode, setMode] = useState<'checking' | 'sample' | 'chatgpt'>(() => {
     if (!userId || !session || offlineAccess || !navigator.onLine) return 'sample';
     const cached = localStorage.getItem(`fitcoach:${userId}:coach-mode`);
@@ -287,7 +288,8 @@ export function CoachProvider({ children }: { children: ReactNode }) {
     return () => { current = false; window.removeEventListener('focus', visible); document.removeEventListener('visibilitychange', visible); };
   }, [userId]);
 
-  const activeMessages = mode === 'chatgpt' ? serverMessages : sampleMessages;
+  const savedMessages = mode === 'chatgpt' ? serverMessages : sampleMessages;
+  const activeMessages = [...savedMessages, ...(pendingMessages?.scope === scope.current ? pendingMessages.messages.filter(message => !savedMessages.some(saved => saved.id === message.id)) : [])];
   const allProposals = [...proposals, ...serverProposals];
 
   const send = async (value = text) => {
@@ -303,6 +305,8 @@ export function CoachProvider({ children }: { children: ReactNode }) {
     setText('');
     try {
       const user: Message = { id: uid(), role: 'user', text: content, createdAt: new Date().toISOString() };
+      const streamingAssistant = assistantMessage('', mode === 'chatgpt' ? 'chatgpt' : 'sample');
+      setPendingMessages({ scope: turnScope, messages: [user] });
       const saved = await run(async () => {
         const isLive = mode === 'chatgpt' && userId && navigator.onLine;
         const adapter = isLive ? liveCoach(userId!, trainingDataReady) : sampleCoach;
@@ -314,6 +318,7 @@ export function CoachProvider({ children }: { children: ReactNode }) {
             : { conversationId: turnConversationId, requestId: uid(), text: content };
           localStorage.setItem(pendingKey, JSON.stringify(pendingTurn.current));
         }
+        if (!isLive) await putLocalChange('messages', user, turnDatabase.messages, turnDatabase);
         const reply = await adapter.respond({
           messages: [...turnMessages, user],
           profile,
@@ -321,8 +326,10 @@ export function CoachProvider({ children }: { children: ReactNode }) {
           recentWorkouts: sessions.filter(s => s.status === 'completed').slice(-5),
           conversationId: isLive ? turnConversationId : undefined,
           requestId: isLive ? pendingTurn.current?.requestId : undefined,
+        }, partial => {
+          if (scope.current === turnScope) setPendingMessages({ scope: turnScope, messages: [user, ...(partial ? [{ ...streamingAssistant, text: partial }] : [])] });
         });
-        const assistant = { ...assistantMessage(reply.text, isLive ? 'chatgpt' : 'sample'), id: reply.persistedMessageId ?? uid() };
+        const assistant = { ...assistantMessage(reply.text, isLive ? 'chatgpt' : 'sample'), id: reply.persistedMessageId ?? streamingAssistant.id };
         const persistedUser = reply.persistedUserMessageId ? { ...user, id: reply.persistedUserMessageId } : user;
 
         if (isLive) {
@@ -335,8 +342,9 @@ export function CoachProvider({ children }: { children: ReactNode }) {
               })));
             }
           } else if (scope.current === turnScope) {
-            setServerMessages(existing => [...existing, persistedUser, assistant]);
+            setServerMessages(existing => [...existing.filter(message => message.id !== persistedUser.id && message.id !== assistant.id), persistedUser, assistant]);
           }
+          if (scope.current === turnScope) setPendingMessages(null);
           if (pendingKey && localStorage.getItem(pendingKey) === JSON.stringify(pendingTurn.current)) localStorage.removeItem(pendingKey);
           pendingTurn.current = null;
         }
@@ -368,9 +376,8 @@ export function CoachProvider({ children }: { children: ReactNode }) {
           }
         } else {
           await turnDatabase.transaction('rw', [turnDatabase.messages, turnDatabase.proposals, turnDatabase.outbox], async () => {
-            await turnDatabase.messages.bulkPut([user, assistant]);
+            await turnDatabase.messages.put(assistant);
             if (proposal) await turnDatabase.proposals.add(proposal);
-            await enqueueChange('messages', user.id, 'upsert', user, turnDatabase);
             await enqueueChange('messages', assistant.id, 'upsert', assistant, turnDatabase);
             if (proposal) await enqueueChange('proposals', proposal.id, 'upsert', proposal, turnDatabase);
           });
@@ -383,6 +390,7 @@ export function CoachProvider({ children }: { children: ReactNode }) {
         setRecovery(null);
       }
     } finally {
+      setPendingMessages(null);
       sendLock.current = false;
       setSending(false);
       if (needsRecovery || scope.current !== turnScope) setRecoveryVersion(version => version + 1);
@@ -528,9 +536,9 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
 
   useEffect(() => {
     if (!messages.length && !sending) { following.current = true; setUnreadReply(false); scrollPane.current?.scrollTo(0, 0); return; }
-    if (following.current) bottom.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'end' });
+    if (following.current) bottom.current?.scrollIntoView({ behavior: sending || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'end' });
     else if (!sending) setUnreadReply(true);
-  }, [messages.length, sending]);
+  }, [messages.length, messages.at(-1)?.text, sending]);
 
   return (
     <div className="page coach-page">
@@ -566,7 +574,7 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
         </div>
       )}
 
-      <div className="messages">
+      <div className="messages" aria-busy={sending}>
         {messages.map(message => {
           const proposal = allProposals.find(p => p.messageId === message.id);
           const workoutProposal = workoutProposals.find(p => p.messageId === message.id);
@@ -686,7 +694,7 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
             </article>
           );
         })}
-        {sending && (
+        {sending && messages.at(-1)?.role !== 'assistant' && (
           <div className="message assistant">
             <span className="message-avatar"><Sparkles size={17} /></span>
             <div className="typing" role="status" aria-label="Preparing Coach response"><i /><i /><i /></div>

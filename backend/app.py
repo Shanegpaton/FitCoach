@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from cryptography.fernet import InvalidToken
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.exc import DBAPIError, DataError, IntegrityError, TimeoutError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -361,7 +361,44 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
     register_context_routes(app, database, coach_credentials)
 
     @app.post('/v1/chatgpt/coach')
-    async def chatgpt_coach(body: CoachRequest, user: User):
+    async def chatgpt_coach(body: CoachRequest, user: User, request: Request):
+        if "text/event-stream" in request.headers.get("accept", ""):
+            async def events():
+                queue = asyncio.Queue(maxsize=128)
+
+                async def emit(event):
+                    await queue.put(event)
+
+                async def generate():
+                    try:
+                        reply = await execute_coach(body, user, emit)
+                        await emit({"type": "completed", "reply": reply})
+                    except HTTPException as exc:
+                        await emit({"type": "error", "status": exc.status_code, "detail": exc.detail})
+                    except Exception:
+                        logger.exception("Coach stream failed")
+                        await emit({"type": "error", "status": 503, "detail": "Coach is unavailable. Your message is kept; check its status before retrying."})
+
+                task = asyncio.create_task(generate())
+                try:
+                    while True:
+                        try:
+                            event = await asyncio.wait_for(queue.get(), timeout=15)
+                        except asyncio.TimeoutError:
+                            yield ": keep-alive\n\n"
+                            continue
+                        yield "data: " + json.dumps(event) + "\n\n"
+                        if event["type"] in ("completed", "error"):
+                            break
+                finally:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+            return StreamingResponse(events(), media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+        return await execute_coach(body, user)
+
+    async def execute_coach(body, user, emit=None):
         if body.message.role != 'user':
             raise HTTPException(422, 'A Coach turn must contain one user message.')
         record = await coach_credentials(user)
@@ -387,11 +424,16 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                 else:
                     _, history = await conversation_messages(database, user, body.conversationId)
 
+                async def on_text(delta):
+                    await emit({"type": "delta", "text": delta})
+
                 async def respond(input_items):
+                    if emit:
+                        await emit({"type": "reset"})
                     if context_session:
-                        return await context_session.respond(input_items, body.trainingDataReady)
+                        return await context_session.respond(input_items, body.trainingDataReady, **({"on_text": on_text} if emit else {}))
                     return await inference.complete_agent_turn(record['access_token'], input_items,
-                        TOOL_SPECS if body.trainingDataReady else [], body.trainingDataReady, budget=budget)
+                        TOOL_SPECS if body.trainingDataReady else [], body.trainingDataReady, budget=budget, **({"on_text": on_text} if emit else {}))
 
                 async def run_tool(name, arguments):
                     if not body.trainingDataReady:

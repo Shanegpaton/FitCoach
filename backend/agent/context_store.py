@@ -377,11 +377,11 @@ class ContextSession:
             # Do not rerun tools or silently throw away historical user requests.
             raise ContextLengthError()
 
-    async def respond(self, trace, training_ready):
+    async def respond(self, trace, training_ready, on_text=None):
         for retry in range(2):
             items = await self.prepare(trace, force=bool(retry))
             try:
-                return await complete_agent_turn(self.token, items, self.tools, training_ready, budget=self.budget)
+                return await complete_agent_turn(self.token, items, self.tools, training_ready, budget=self.budget, **({"on_text": on_text} if on_text else {}))
             except ContextLengthError:
                 if retry:
                     raise
