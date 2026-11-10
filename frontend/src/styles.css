@@ -707,3 +707,6 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 .coach-model-current { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; line-height: 18px; }
 .coach-model-current > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .coach-model-current > svg { flex-shrink: 0; }
+
+.coach-model-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
+.coach-model-actions .text-button { padding: 12px 16px; }

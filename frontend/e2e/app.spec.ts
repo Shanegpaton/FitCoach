@@ -1482,7 +1482,8 @@ test.describe('Coach model settings', () => {
   test.use({ serviceWorkers: 'block' });
 
 test('Coach model is explicit, survives reload, and offers an available fallback', async ({ page, context }, info) => {
-  let preferredModel: string | null = 'preferred-model';
+  let preferredModel: string | null = null;
+  const defaultModel = 'preferred-model';
   let version = 1;
   let models = ['preferred-model', 'fallback-model'];
   const saves: string[] = [];
@@ -1498,8 +1499,9 @@ test('Coach model is explicit, survives reload, and offers an available fallback
       preferredModel = model; saves.push(model); version++;
       return route.fulfill({ json: { saved: true }, headers });
     }
-    const selectedModel = preferredModel && models.includes(preferredModel) ? preferredModel : null;
-    return route.fulfill({ json: { preferredModel, defaultModel: null, selectedModel,
+    const effectiveModel = preferredModel ?? defaultModel;
+    const selectedModel = models.includes(effectiveModel) ? effectiveModel : null;
+    return route.fulfill({ json: { preferredModel, defaultModel, selectedModel,
       available: selectedModel !== null, models: models.map(id => ({ id })), catalogError: null, etag: `"${version}"` }, headers });
   });
   await context.route('https://api.example.com/v1/chatgpt/connection', route => route.fulfill({
@@ -1520,6 +1522,11 @@ test('Coach model is explicit, survives reload, and offers an available fallback
   await page.getByRole('button', { name: 'Coach model: preferred-model', exact: true }).click();
   const section = page.getByRole('dialog', { name: 'Coach model', exact: true });
   await expect(section).toContainText('Verified available: preferred-model');
+  await expect(section.getByLabel('Preferred Coach model')).toHaveValue('preferred-model');
+  await section.getByLabel('Preferred Coach model').selectOption('fallback-model');
+  await section.getByRole('button', { name: 'Close dialog' }).click();
+  await page.getByRole('button', { name: 'Coach model: preferred-model', exact: true }).click();
+  await expect(section.getByLabel('Preferred Coach model')).toHaveValue('preferred-model');
   await expect(section.getByRole('button', { name: 'Save Coach model' })).toBeDisabled();
   models = ['fallback-model'];
   await section.getByRole('button', { name: 'Refresh models' }).click();
