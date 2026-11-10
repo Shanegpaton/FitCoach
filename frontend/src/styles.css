@@ -700,3 +700,10 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 .session-timing > div { flex: 1 1 140px; min-width: 0; }
 .session-timing dt { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
 .session-timing dd { margin: 0; font-size: 16px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+
+.coach-model-picker { flex: 1; min-width: 0; min-height: 44px; padding: 4px 6px; border: 0; border-radius: 8px; background: transparent; text-align: left; color: var(--text); }
+.coach-model-picker:hover { background: var(--surface); }
+.coach-model-chat-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; line-height: 20px; }
+.coach-model-current { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; line-height: 18px; }
+.coach-model-current > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coach-model-current > svg { flex-shrink: 0; }

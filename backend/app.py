@@ -28,6 +28,7 @@ if __package__:
     from . import chatgpt_credentials as chatgpt
     from .agent import context_store as contexts
     from .agent.context_routes import register_context_routes
+    from .agent.model_routes import register_model_routes, model_settings
     from .agent import inference
     from .agent.graph import build_coach_graph
     from .agent.tools.database import TOOL_SPECS, run_database_tool
@@ -45,6 +46,7 @@ else:
     import chatgpt_credentials as chatgpt
     from agent import context_store as contexts
     from agent.context_routes import register_context_routes
+    from agent.model_routes import register_model_routes, model_settings
     from agent import inference
     from agent.graph import build_coach_graph
     from agent.tools.database import TOOL_SPECS, run_database_tool
@@ -356,8 +358,10 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
                     await session.execute(sa.text('''UPDATE fitcoach.chatgpt_credentials
                         SET ciphertext = :ciphertext, updated_at = now() WHERE user_id = :user_id'''),
                         {'user_id': user, 'ciphertext': chatgpt.encrypt_record(record)})
+        record['preferred_model'] = (await model_settings(database, user))['preferred_model']
         return record
 
+    register_model_routes(app, database, coach_credentials)
     register_context_routes(app, database, coach_credentials)
 
     @app.post('/v1/chatgpt/coach')
@@ -413,7 +417,7 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
         try:
             async with processing_turn(database, user, body.conversationId, body.requestId, claim['attemptId']):
                 context_session = None
-                budget = await inference.resolve_model(record['access_token'])
+                budget = await inference.resolve_model(record['access_token'], record.get('preferred_model'))
                 if contexts.enabled():
                     async with contexts.transaction(database, user, True) as session:
                         latest = await session.scalar(sa.text('SELECT max(sequence) FROM fitcoach.coach_messages WHERE conversation_id=:c'), {'c': body.conversationId})

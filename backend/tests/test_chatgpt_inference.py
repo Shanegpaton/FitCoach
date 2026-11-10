@@ -7,6 +7,11 @@ import pytest
 from backend.agent import inference
 
 
+@pytest.fixture(autouse=True)
+def configured_model(monkeypatch):
+    monkeypatch.setenv('FITCOACH_COACH_MODEL', 'available')
+
+
 @pytest.mark.asyncio
 async def test_refresh_rotates_both_tokens_and_uses_issued_client(monkeypatch):
     actual = []

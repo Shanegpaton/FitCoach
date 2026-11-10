@@ -11,6 +11,7 @@ import { useApp } from '../state';
 import { PlanEditor } from './Plans';
 import { Modal, ProposalReadiness } from '../ui';
 import { WorkoutProposal } from './WorkoutProposal';
+import { CoachModelPicker } from './CoachModelPicker';
 import type { ServerProposal, ServerWorkoutProposal } from '../coach';
 
 const CoachMarkdown = lazy(() => import('../CoachMarkdown').then(module => ({ default: module.CoachMarkdown })));
@@ -544,7 +545,7 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
     <div className="page coach-page">
       <header className="coach-header">
         <Link to="/" className="icon-button" aria-label="Today" title="Back to Today"><ArrowLeft size={21} /></Link>
-        <h1 className="coach-toolbar-title" title={activeChat?.title}>{mode === 'chatgpt' ? activeChat?.title ?? 'Coach' : mode === 'checking' ? 'Connecting…' : 'Coach'}</h1>
+        {mode === 'chatgpt' ? <CoachModelPicker title={activeChat?.title ?? 'Coach'} disabled={sending || (recovery !== null && recovery !== 'failed')} /> : <h1 className="coach-toolbar-title">{mode === 'checking' ? 'Connecting…' : 'Coach'}</h1>}
         <div className="coach-header-actions">
           {mode === 'chatgpt' && <>
             <button className="icon-button" aria-label="Chats" title="Your conversations" onClick={() => { setChatSearch(''); setChatsOpen(true); }}><MessageCircle size={20} /></button>

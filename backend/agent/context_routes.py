@@ -130,7 +130,7 @@ def register_context_routes(app, database, credentials):
         if body.conversationId:
             try:
                 record = await credentials(user)
-                budget = await resolve_model(record['access_token'])
+                budget = await resolve_model(record['access_token'], record.get('preferred_model'))
                 async with contexts.transaction(database, user, True) as session:
                     await contexts.ensure(session, user, body.conversationId)
                 context_session = contexts.ContextSession(database, user, body.conversationId, record['access_token'], budget, TOOL_SPECS, True)
@@ -146,7 +146,7 @@ def register_context_routes(app, database, credentials):
         try:
             async with asyncio.timeout(70):
                 record = record or await credentials(user)
-                budget = budget or await resolve_model(record['access_token'])
+                budget = budget or await resolve_model(record['access_token'], record.get('preferred_model'))
                 processed = await contexts.process_job(database, user, record['access_token'], budget, job)
         except InferenceError as error:
             raise HTTPException(error.status, error.message) from None

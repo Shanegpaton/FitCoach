@@ -1467,9 +1467,84 @@ test('Coach shows the sent message immediately and streams the reply before comp
   await page.evaluate(() => window.dispatchEvent(new Event('coach-test-delta')));
   await expect(page.locator('.message.assistant .message-markdown')).toHaveText('Start with two');
   await expect(page.getByRole('button', { name: 'Send message' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /^Coach model:/ })).toBeDisabled();
   await page.evaluate(() => window.dispatchEvent(new Event('coach-test-complete')));
   await expect(page.locator('.message.assistant .message-markdown')).toHaveText('Start with two training days.');
   await expect(page.locator('.message.user')).toHaveCount(1);
   await expect(page.locator('.message.assistant')).toHaveCount(1);
   await expect(page.locator('.messages')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.getByRole('button', { name: /^Coach model:/ })).toBeEnabled();
+});
+
+
+test.describe('Coach model settings', () => {
+  // Keep mocked account catalog requests visible across reloads.
+  test.use({ serviceWorkers: 'block' });
+
+test('Coach model is explicit, survives reload, and offers an available fallback', async ({ page, context }, info) => {
+  let preferredModel: string | null = 'preferred-model';
+  let version = 1;
+  let models = ['preferred-model', 'fallback-model'];
+  const saves: string[] = [];
+  await context.route('https://api.example.com/v1/chatgpt/models', async route => {
+    const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173',
+      'Access-Control-Allow-Headers': 'authorization,content-type,if-match',
+      'Access-Control-Allow-Methods': 'GET,PUT,OPTIONS' };
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (route.request().method() === 'PUT') {
+      expect(route.request().headers()['if-match']).toBe(`"${version}"`);
+      const model = route.request().postDataJSON().preferredModel;
+      expect(models).toContain(model);
+      preferredModel = model; saves.push(model); version++;
+      return route.fulfill({ json: { saved: true }, headers });
+    }
+    const selectedModel = preferredModel && models.includes(preferredModel) ? preferredModel : null;
+    return route.fulfill({ json: { preferredModel, defaultModel: null, selectedModel,
+      available: selectedModel !== null, models: models.map(id => ({ id })), catalogError: null, etag: `"${version}"` }, headers });
+  });
+  await context.route('https://api.example.com/v1/chatgpt/connection', route => route.fulfill({
+    json: { connected: true, planUsageGranted: true, storedInBackend: true },
+    headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173' },
+  }));
+  const chats = mockConversations(context);
+  const now = new Date().toISOString();
+  chats.items.push({ id: 'model-test-chat', title: 'Training chat', createdAt: now, updatedAt: now });
+  chats.messages.set('model-test-chat', [
+    { id: 'existing-user', role: 'user', text: 'Keep my training conversation.', createdAt: now },
+    { id: 'existing-assistant', role: 'assistant', text: 'Your training conversation stays here.', createdAt: now },
+  ]);
+  await openApp(page);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Coach model', exact: true })).toHaveCount(0);
+  await openCoach(page);
+  await page.getByRole('button', { name: 'Coach model: preferred-model', exact: true }).click();
+  const section = page.getByRole('dialog', { name: 'Coach model', exact: true });
+  await expect(section).toContainText('Verified available: preferred-model');
+  await expect(section.getByRole('button', { name: 'Save Coach model' })).toBeDisabled();
+  models = ['fallback-model'];
+  await section.getByRole('button', { name: 'Refresh models' }).click();
+  await expect(section.getByRole('alert')).toContainText('Your selected model is unavailable');
+  await expect(section).toContainText('Selected model: preferred-model');
+  await section.screenshot({ path: info.outputPath('coach-model-unavailable.png') });
+  expect(saves).toEqual([]);
+  await section.getByLabel('Preferred Coach model').selectOption('fallback-model');
+  await section.getByRole('button', { name: 'Save Coach model' }).click();
+  await expect(section).toContainText('Verified available: fallback-model');
+  await section.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(page.getByRole('button', { name: 'Coach model: fallback-model', exact: true })).toBeVisible();
+  await expect(page.getByText('Your training conversation stays here.', { exact: true })).toBeVisible();
+  await page.screenshot({ path: info.outputPath('coach-model-header.png'), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.reload();
+  await page.getByRole('button', { name: 'Coach model: fallback-model', exact: true }).click();
+  await expect(section.getByLabel('Preferred Coach model')).toHaveValue('fallback-model');
+  expect(saves).toEqual(['fallback-model']);
+  await context.unroute('https://api.example.com/v1/chatgpt/models');
+  await context.route('https://api.example.com/v1/chatgpt/models', route => route.fulfill({ status: 503,
+    headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173' }, json: { detail: 'Model catalog unavailable. Retry shortly.' } }));
+  await section.getByRole('button', { name: 'Refresh models' }).click();
+  await expect(section.getByRole('alert')).toContainText('Model catalog unavailable');
+  expect(saves).toEqual(['fallback-model']);
+});
+
 });

@@ -129,8 +129,8 @@ async def test_model_detail_discovery_and_daily_cache(monkeypatch):
         return httpx.Response(200, json={'id': 'discovered', 'context_window': 128_000, 'max_output_tokens': 4000})
     real = httpx.AsyncClient
     monkeypatch.setattr(inference.httpx, 'AsyncClient', lambda **kw: real(transport=httpx.MockTransport(respond)))
-    first = await inference.resolve_model('token')
-    second = await inference.resolve_model('token')
+    first = await inference.resolve_model('token', 'discovered')
+    second = await inference.resolve_model('token', 'discovered')
     assert first == second and first.window == 128_000 and first.output == 4000
     assert detail_calls == ['/v1/models/discovered']
 

@@ -53,6 +53,8 @@ Set `VITE_FITCOACH_API_URL` in `frontend/.env.development.local` to the local tr
 
 Open `http://localhost:4173` once online, then test offline. Service-worker caching is enabled in the production build, not the development server. Keep using the same origin: development, preview, and different hostnames have separate browser databases.
 
+Live Coach uses an explicit account model preference set in **Coach → model selector**. The Coach selector verifies availability and offers alternatives when access changes; switching requires saving a choice. Deployments may configure an exact `FITCOACH_COACH_MODEL` default. Without a preference or deployment default, users must choose a model. Apply Alembic migration `0012` before deploying this version; see [the API guide](backend/README.md#coach-model-selection).
+
 ### What you can do
 
 The phone UI puts Start/Resume ahead of the calendar on Today and three recent sessions ahead of trends in History. **View all sessions** opens a searchable journal in pages of 20. Navigation, Resume, notifications, and workout actions reserve their own space outside the scrolling content, including when the visible viewport shrinks for a phone keyboard. On narrow phones, profile day choices wrap and the week strip can scroll horizontally to retain touch-sized targets.

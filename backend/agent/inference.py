@@ -3,6 +3,7 @@ import json
 from urllib.parse import quote
 import logging
 import time
+import os
 
 from .context import ModelBudget, model_budget, has_cached_limit, positive_int
 
@@ -56,16 +57,7 @@ async def complete_response(access_token: str, messages: list[dict], context: st
     headers = {'Authorization': f'Bearer {access_token}'}
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(90, connect=10), follow_redirects=False) as client:
-            catalog = await client.get(f'{RESOURCE}/models', headers=headers)
-            if catalog.status_code == 401:
-                raise InferenceError(401, 'ChatGPT connection expired. Reconnect in Settings.')
-            catalog.raise_for_status()
-            models = catalog.json().get('models', [])
-            model = next((item.get('slug') for item in models
-                          if isinstance(item, dict) and item.get('visibility') == 'list'
-                          and isinstance(item.get('slug'), str)), None)
-            if not model:
-                raise InferenceError(403, 'No ChatGPT plan model is available for this account.')
+            model = (await resolve_model(access_token)).model
             payload = {'model': model, 'store': False, 'stream': True,
                        'instructions': ('You are FitCoach, a practical fitness planning assistant. '
                                         'Use the supplied training context. Do not claim to change plans or log workouts. '
@@ -287,8 +279,12 @@ class ContextLengthError(InferenceError):
         super().__init__(422, 'Coach context is too large. Your message is saved; narrow the request and retry.')
 
 
-async def resolve_model(access_token: str) -> ModelBudget:
-    """Discover limits from the account catalog, then exact verified IDs, then fallback."""
+def preferred_model(override: str | None = None) -> str | None:
+    return override or os.getenv('FITCOACH_COACH_MODEL', '').strip() or None
+
+
+async def available_models(access_token: str) -> list[dict]:
+    """Return visible exact IDs; provider ordering never determines selection."""
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
             response = await client.get(f'{RESOURCE}/models', headers={'Authorization': f'Bearer {access_token}'})
@@ -296,10 +292,28 @@ async def resolve_model(access_token: str) -> ModelBudget:
                 raise InferenceError(401, 'ChatGPT connection expired. Reconnect in Settings.')
             response.raise_for_status()
             models = response.json().get('models', [])
-            selected = next((item for item in models if isinstance(item, dict)
-                             and item.get('visibility') == 'list' and isinstance(item.get('slug'), str)), None)
-            if not selected:
-                raise InferenceError(403, 'No ChatGPT plan model is available for this account.')
+            if not isinstance(models, list):
+                raise ValueError('Invalid model catalog')
+            return sorted({item['slug']: item for item in models if isinstance(item, dict)
+                           and item.get('visibility') == 'list' and isinstance(item.get('slug'), str)
+                           and 0 < len(item['slug']) <= 200}.values(), key=lambda item: item['slug'])
+    except InferenceError:
+        raise
+    except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+        raise InferenceError(503, 'ChatGPT model discovery is unavailable. Try again.') from None
+
+
+async def resolve_model(access_token: str, preference: str | None = None) -> ModelBudget:
+    """Discover limits from the account catalog, then exact verified IDs, then fallback."""
+    model = preferred_model(preference)
+    if not model:
+        raise InferenceError(409, 'Choose a model on the Coach page before sending a message.')
+    models = await available_models(access_token)
+    selected = next((item for item in models if item['slug'] == model), None)
+    if not selected:
+        raise InferenceError(409, f'The selected Coach model ({model}) is unavailable for your ChatGPT account. Choose another model on the Coach page. Your selection has not changed.')
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
             if not positive_int(selected.get('context_window') or selected.get('context_length')) and not has_cached_limit(selected['slug']):
                 # Some account catalogs omit limits but expose them on model details.
                 # A missing/unsupported detail endpoint is not a model-access failure.
