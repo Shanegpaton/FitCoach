@@ -4,29 +4,35 @@ This service gives one FitCoach account at a time an exclusive five-minute sessi
 
 ## Run on a disposable VM
 
+Install the Python dependencies from the repository root in the VM's virtual environment:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r services/chatgpt_vm/requirements.txt
+```
+
+The units below assume the checkout is installed at `/opt/fitcoach-vm`. Install the desktop, VNC/websockify, Openbox, Firefox, and Caddy separately; the Python requirements do not install them. Copy the supplied `systemd/xstartup` to the browser user's VNC startup location and install the units from `systemd/` after creating their users and directories. Replace the hostname in `Caddyfile.example` with your VM's HTTPS hostname.
+
 Install a graphical browser and provide an authenticated HTTPS remote browser session that the iPhone can control. Do not enable browser-session recording. Use a fresh, single-user VM and protect its filesystem from other users.
 
-For the current Oracle Ubuntu deployment, the live Python code and virtual environment are root-owned under
-`/opt/fitcoach-vm`. A Firefox desktop runs as the unprivileged `fitcoach-browser` user, with no sudo access, and is served by TigerVNC on
+The checked-in Ubuntu systemd units expect root-owned Python code and a virtual environment under
+`/opt/fitcoach-vm`. They run Firefox as the unprivileged `fitcoach-browser` user, with no sudo access, served by TigerVNC on
 `127.0.0.1:5901` and noVNC on `127.0.0.1:6080`; neither port should be opened in
-the VCN security list. The PWA embeds a noVNC client and connects to the gateway's
-authenticated WebSocket relay at `/v1/viewer`. Open TCP 80 and 443 in the Oracle VCN security
-list and host firewall, then start Caddy so it can obtain a trusted certificate.
-Do not expose the raw noVNC endpoint. The VM is an E5 paid shape, so stop it when the service is
-idle and account for persistent boot-volume charges.
+the public firewall. The PWA embeds a noVNC client and connects to the gateway's
+authenticated WebSocket relay at `/v1/viewer`. Allow TCP 80 and 443 through the hosting network and host firewall, then start Caddy so it can obtain a trusted certificate.
+Keep the raw noVNC endpoint private. Hosting provider, instance shape, billing, and live service state must be checked in the deployment environment; they are not established by these files.
 The loopback desktop is managed by `fitcoach-vnc.service` and `fitcoach-novnc.service` in
 [`systemd/`](systemd/). `fitcoach-browser-launcher.service` opens only approved OpenAI authorization URLs.
 The gateway and OAuth callback run as the separate `fitcoach-auth` system user. Its owner-only state directory
 is `/var/lib/fitcoach-auth/state`, including `credentials.json`, `host.json`, and `owner.json`.
 The browser user cannot read that directory, use sudo, or edit the root-owned code used by the gateway.
-These services start after a VM reboot.
+Enable the installed systemd units if they should start after a VM reboot.
 When setting up another VM, create `fitcoach-browser` without sudo and `fitcoach-auth` as separate
 system users. Add `fitcoach-auth` to the `fitcoach-browser` group so it can reach the local launcher
 socket, keep `/var/lib/fitcoach-auth` mode `0700` and its JSON files mode `0600`, and make
 `/opt/fitcoach-vm` and its virtual environment root-owned without group or other write permission.
 Do not run the VNC desktop as the default `ubuntu` user on Oracle images, because that user has
-passwordless sudo. The browser profile from the earlier `ubuntu` desktop was archived inside the
-protected auth home when this VM was migrated.
+passwordless sudo. The supplied `fitcoach-novnc.service` runs the loopback websockify relay as `ubuntu`; change that unit if your host uses a different relay account. The browser and credential service use their separate dedicated accounts.
 Install Mozilla's signed `firefox-esr` DEB package from its official APT
 repository. The gateway retains `NoNewPrivileges=true`; Ubuntu's Snap Firefox
 cannot start under that restriction. The sign-in process uses
@@ -40,8 +46,7 @@ The VNC display accepts connections only from VM loopback; the public viewer
 requires an attempt-specific token and an exact allowed PWA origin. The gateway
 service binds to `127.0.0.1:8787`; [Caddyfile.example](Caddyfile.example) is the
 HTTPS reverse proxy. Remove any older `/browser/*` proxy route when upgrading;
-the authenticated `/v1/viewer` relay is the only supported browser path. Only ports 80 and 443 need external access. The
-installed but logged-out Tailscale client is not part of this route.
+the authenticated `/v1/viewer` relay is the only supported browser path. Only ports 80 and 443 need external access. A VPN or alternate remote-browser proxy is not required by the supplied route.
 
 Set `VITE_CHATGPT_VM_URL` to the VM's HTTPS origin when building the PWA. On the VM,
 put `FITCOACH_VM_SUPABASE_URL`, `FITCOACH_VM_SUPABASE_KEY` (the public anon key),
@@ -55,15 +60,16 @@ the API obtains and redeems a short-lived, one-use handoff code directly with th
 record, and stores it in the account-scoped Supabase PostgreSQL database. The PWA receives only
 connection status. Set `FITCOACH_VM_HANDOFF_KEY` in `/etc/fitcoach-vm.env` to the same 32-byte
 base64url value as the API project's `FITCOACH_CHATGPT_SECRET`. After the database commit, the API confirms the handoff so the VM removes its credential file and browser profile, then releases the session. Keep the VM running until Settings confirms that cleanup completed. A second FitCoach user receives a busy response while the lease is active. The viewer token is held only in PWA memory and is valid for five minutes.
-An older permanent `owner.json` is released automatically if it has no credentials. If it still has credentials, sign in as that FitCoach account and save them to the backend before other accounts use the VM; the gateway preserves that record until handoff confirmation.
+An older permanent `owner.json` is released automatically if it has no credentials. If it still has credentials, sign in as that FitCoach account and save them to the backend before other accounts use the VM. Ordinary leased sessions are also cleared on expiry or explicit disconnect; temporary VM credentials are not a durable backup.
 The training API and account sync remain separate.
 
-From the iPhone, control the **VM browser** and finish OpenAI consent. The protected OAuth process waits five minutes for a one-use `http://127.0.0.1:<port>/auth/callback` request. It then exchanges the code with the issued client ID and verifies the signed ID token through OpenAI’s JWKS. Tokens and the stable opaque host ID stay in the protected state directory. The browser receives the OpenAI page and callback response, never the token JSON. Do not capture the authorization URL, browser session, terminal output, or credential files in diagnostics. The VM serves accounts sequentially; it does not isolate simultaneous Firefox desktops.
+From the iPhone, control the **VM browser** and finish OpenAI consent. The protected OAuth process waits five minutes for a one-use `http://127.0.0.1:<port>/auth/callback` request. It then exchanges the code with the issued client ID and verifies the signed ID token through OpenAI’s JWKS. Tokens and the stable opaque host ID are held temporarily in the protected state directory until handoff cleanup, disconnect, or lease expiry. The browser receives the OpenAI page and callback response, never the token JSON. Do not capture the authorization URL, browser session, terminal output, or credential files in diagnostics. The VM serves accounts sequentially; it does not isolate simultaneous Firefox desktops.
 
 ```bash
 sudo -u fitcoach-auth HOME=/var/lib/fitcoach-auth .venv/bin/python -m services.chatgpt_vm.siwc status --storage /var/lib/fitcoach-auth/state
 sudo -u fitcoach-auth HOME=/var/lib/fitcoach-auth .venv/bin/python -m services.chatgpt_vm.siwc disconnect --storage /var/lib/fitcoach-auth/state
-.venv/bin/python -m pytest -q services/chatgpt_vm/test_siwc.py services/chatgpt_vm/test_browser_launcher.py
+.venv/bin/python -m pip install pytest pytest-asyncio
+.venv/bin/python -m pytest -q services/chatgpt_vm/test_siwc.py services/chatgpt_vm/test_gateway.py services/chatgpt_vm/test_browser_launcher.py
 ```
 
 Successful local tests do not prove the iPhone to VM browser route or OpenAI authorization. Document a real iPhone run's callback, successful code exchange, validated identity, and granted scopes without recording the browser session or tokens. Stop the product integration if this gate fails. Before offering this flow to other users, confirm with OpenAI that FitCoachGPT-operated VMs are eligible for the open-source plan-usage flow; [OpenAI’s overview](https://developers.openai.com/siwc/token-sharing-open-source) directs remotely hosted apps to its interest process.

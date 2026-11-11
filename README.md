@@ -1,10 +1,10 @@
 # FitCoachGPT
 
+FitCoachGPT is a phone-first workout planner and tracker. Build a routine, log your sets, and see your progress in a dark, installable Progressive Web App (PWA).
+
 ## ChatGPT VM connection
 
 Settings contains the [ChatGPT VM connection](services/chatgpt_vm/README.md). The authenticated API starts a five-minute exclusive VM session for a FitCoach account; no operator pairing code is needed. The PWA controls the protected VM browser and shows the verified ChatGPT account and whether plan usage was granted. After sign-in, the API retrieves a one-use handoff, stores encrypted credentials in the account-scoped Supabase PostgreSQL backend, and asks the VM to delete its temporary credentials and Firefox profile. The PWA receives only connection status and a short-lived viewer token. With granted plan usage, Coach sends online requests through the authenticated API; the API refreshes tokens and calls the Responses API. Offline or disconnected Coach uses labeled sample responses. OpenAI eligibility for FitCoachGPT-operated VMs needs confirmation before broader release.
-
-FitCoachGPT is a phone-first workout planner and tracker. Build a routine, log your sets, and see your progress in a dark, installable Progressive Web App (PWA).
 
 The app stores plans, goals, workout history, and sample conversations on your device. Live Coach conversations are stored in your account. Google sign-in uses Supabase Auth; each account has a separate local workout database. After an account signs in on a device, the workout tracker remains available offline.
 
@@ -61,7 +61,7 @@ The phone UI puts Start/Resume ahead of the calendar on Today and three recent s
 
 Workouts record their start when you select **Start workout** and finish when you save the completed workout. The workout log shows both timestamps in local time and total elapsed time, including rests and time away from the app. Active workouts show a live elapsed timer that recovers after reload; History and Today’s recent sessions show completed durations.
 
-Workout rows show actual weight and reps separately from targets. **Repeat last set** explicitly copies a completed earlier set's weight and reps without completing the new set. Each row has **Effort & options** for optional RPE and removal. Workout edits save locally as you edit; the save status distinguishes saving, saved, and failed changes. In Coach, Enter inserts a newline; Ctrl/Command+Enter or the Send button sends.
+Workout rows show actual weight and reps separately from targets. **Repeat last set** explicitly copies a completed earlier set's weight and reps without completing the new set. Each row has **Effort & options** for optional RPE and removal. Workout edits save locally as you edit; the save status distinguishes saving, saved, and failed changes.
 
 Plans remain drafts until Save; errors appear inside their dialog and moving an occupied training day requires confirmation. Rest/superset and drop-set tools are expandable. Profile edits remain account-scoped drafts in this tab's session storage across navigation and reload until **Save changes** applies them. The button appears only when there are unsaved profile changes and hides after saving or reverting the edits. If the saved profile changes meanwhile, compare it with the draft before choosing which values to keep. Drafts are separate from synchronized training records and workout backups. Settings includes links to profile, synchronization/backups, ChatGPT, memory, and installation.
 
@@ -72,11 +72,19 @@ Plans remain drafts until Save; errors appear inside their dialog and moving an 
 - Log actual weights, reps, optional RPE, warm-ups, supersets, drop sets, and notes.
 - Resume an unfinished session after closing the app; rest timers retain their deadlines.
 - Review session history, exercise benchmarks, weekly sets, workout frequency, and external-load volume.
-- Export and import versioned JSON backups. Invalid imports leave existing data intact.
+- Export and import versioned JSON backups of local training data, sample messages, and cached proposals. Canonical live conversations, summaries, memories, and model settings stay in the account backend and are not exported. Invalid imports leave existing data intact.
 
 Today, Plan, Coach, and History are the four primary tabs. Weight progression is user-controlled; previous results are shown as references. Starting weights are never invented, and personal history starts empty. For dumbbells, use combined external load consistently; bodyweight volume counts only added load.
 
-### Coach in this milestone
+Today puts the suggested workout first, then lists all saved routines directly below it: current-plan workouts first, followed by workouts grouped under their other saved plans. Each row starts that routine in one tap, using its source plan without activating it. The calendar and stats sit below the routine library. **Start another session** jumps to this list after a completed workout. Weekly schedules stay unchanged; completing an out-of-order rotation workout leaves that plan’s next workout in place.
+
+Active workouts hide the global header and bottom tabs to give set entry more space. The Today back control remains above the scrolling workout content and returns to the main screens without ending the session; sync/settings remains available beside the workout status. Completed workout logs retain the main navigation.
+
+Background synchronization does not show banners or popups. Its compact status indicator and Settings keep pending uploads, failures, and conflicts available for review.
+
+Finishing a workout with no checked-off sets offers **Discard workout** or **Keep workout**, rather than trying to save an empty history entry. Discarding uses the existing recoverable deletion and sync outbox, and does not advance the rotation. Entered values and notes are explicitly covered by the discard confirmation.
+
+### Coach
 
 Chat messages render Markdown headings, emphasis, lists, checklists, blockquotes, links, footnotes, and tables. Fenced `mermaid` blocks render diagrams and charts (including flowcharts, sequences, timelines, and pie charts), with zoom controls, SVG download, and copyable source. Invalid or oversized diagrams preserve their source with a readable fallback. Math uses `$...$` inline or `$$` on separate lines for display equations. Code fences support language-based syntax highlighting and copying; each Coach reply can also be copied. Wide tables, equations, code, and zoomed diagrams scroll within the message on small screens. External images load only after tapping **Load image**; links open separately. Raw HTML and executable content are disabled, Mermaid runs in strict mode with sanitized SVG displayed as an image, and math uses untrusted KaTeX rendering. Renderers and fonts ship with the PWA for cached offline conversations; these presentation features do not add model tools, code execution, generated files, or image generation. Live Coach receives the supported format instructions; sample mode remains labeled sample responses.
 
@@ -84,9 +92,9 @@ Coach uses ChatGPT for freeform conversation when the signed-in account has gran
 
 In Coach, Enter sends a message and Shift+Enter inserts a new line. Footnote links and return links scroll within the chat without moving the surrounding app or changing the page URL. Sent messages appear immediately, and live Coach replies stream into the conversation as text arrives. Partial replies remain provisional until the server saves the completed turn; interrupted requests use the existing status and retry recovery.
 
-Coach opens as a focused chat view with one compact toolbar and no global header or bottom tabs. Back to Today restores the main navigation. The toolbar keeps the conversation title, searchable **Chats**, New chat, and sync/settings access; repeated model and save-status text is omitted. Rename and delete use in-app dialogs. An active workout has a compact Resume link above the composer, which grows with longer drafts.
+Coach opens as a focused chat view with one compact toolbar and no global header or bottom tabs. Back to Today restores the main navigation. The toolbar keeps the conversation title, searchable **Chats**, New chat, and sync/settings access; the model selector provides explicit model selection. Rename and delete use in-app dialogs. An active workout has a compact Resume link above the composer, which grows with longer drafts.
 
-The PWA does not currently call Ollama or the Python backend. That existing backend and its scientific corpus remain available separately below.
+The PWA calls the FastAPI backend for synchronization and connected Coach. It does not call Ollama or use the separate Python RAG pipeline and scientific corpus described below.
 
 The authenticated Coach API runs each live reply through a bounded LangGraph model/tool loop in `backend/agent/`. FastAPI validates the request with Pydantic. Read-only tools in `backend/agent/tools/` can search account-scoped workout history across dates and recorded exercise names, inspect full session snapshots, and read profile, plans, and exercises. Typed proposal tools create reviewable plan and workout previews; only explicit user approval writes those changes. The PWA enables those tools after account data has synchronized; while sync is pending, live Coach can still answer general questions. A request such as “How was my bench press one year ago?” searches a window around that date and uses actual logged sets. The PWA's sample mode and independent Python RAG backend are unchanged.
 
@@ -124,14 +132,14 @@ cd frontend
 npm test
 VITE_FITCOACH_API_URL=https://YOUR_API_HOST npm run build
 npx playwright install webkit
-VITE_FITCOACH_API_URL=https://YOUR_API_HOST npm run test:e2e
+npm run test:e2e
 ```
 
-Browser tests use installed Google Chrome for desktop and Android-sized emulation, plus Playwright WebKit for iPhone-sized emulation. They cover onboarding, offline logging and reload recovery, proposals, supersets, timers, custom exercises, real history, and backups. Physical iOS/Android installation and device alert behavior should also be checked before release.
+Playwright starts a production build/preview with test-only API and auth values and mocked services; it does not verify a deployed backend or real sign-in. Browser tests use installed Google Chrome for desktop and Android-sized emulation, plus Playwright WebKit for iPhone-sized emulation. They cover onboarding, offline logging and reload recovery, proposals, supersets, timers, custom exercises, real history, and backups. Physical iOS/Android installation and device alert behavior should also be checked before release.
 
 ### ChatGPT VM service
 
-Settings can reserve the Oracle VM for one FitCoach account at a time and display its Firefox
+Settings can reserve the configured VM for one FitCoach account at a time and display its Firefox
 sign-in browser inside the PWA. The user completes OpenAI sign-in and permission
 review in that view. On phones, tap the OpenAI field in the remote view, then
 use the keyboard relay below it to type and send Enter, Tab, or Backspace. The
@@ -157,7 +165,7 @@ pip install -r backend/requirements-dev.txt
 
 Follow [the API setup and verification guide](backend/README.md) to provision a restricted runtime role, configure separate runtime/migration connection URLs, apply Alembic migrations, start Uvicorn, and make authenticated requests. Hosted PostgreSQL connections require TLS; use Supabase's direct connection or its session pooler for IPv4 environments. The guide also describes disposable PostgreSQL and Supabase development migration tests.
 
-Production backend pushes to `main` are handled by GitHub Actions: it applies pending Alembic migrations and checkpoint setup before triggering the Vercel backend deploy hook. See the [backend deployment guide](backend/README.md#automate-production-migrations-and-api-deployment) for required GitHub secrets and Vercel settings.
+Backend deployment requires a manual migration and checkpoint-setup step before deploying the API. There is no checked-in GitHub Actions deployment workflow. See the [backend deployment guide](backend/README.md#migration-and-deployment-order) for the sequence and credentials.
 
 The API starts without loading embeddings or Ollama. The API can deploy as a Vercel Python Function with `backend/` as its project root; see [the Vercel deployment steps](backend/README.md#deploy-the-api-on-vercel). Live ChatGPT Coach replies are available to connected accounts through a bounded LangGraph model/tool loop; conversation records and checkpoints are persisted per account, and live Coach plan proposals are persisted for approval across requests. Backend availability does not gate local workout entry. Multiple active sessions are allowed in the cloud so simultaneous offline workouts from different devices cannot reject one another's recorded sets.
 
@@ -242,7 +250,7 @@ PDFs are stored in `data/documents/`. Source metadata is stored in `data/manifes
 
 Each PDF is extracted page by page. The chunker uses the MPNet tokenizer to create chunks of up to 300 model tokens with approximately 25 tokens of sentence-level overlap. Each chunk retains its document ID, title, source URL, year, topics, and page range.
 
-The current corpus produces 972 chunks. Their normalized `float32` embedding matrix has shape `(972, 768)` and uses approximately 2.85 MB of memory.
+Chunk count depends on the corpus, tokenizer, and chunking options. The CLI reports the actual count and normalized `float32` embedding matrix dimensions and memory usage at runtime; each embedding has 768 dimensions.
 
 ## Retrieval
 
@@ -258,7 +266,7 @@ This combination helps with both semantic questions and exact fitness terminolog
 
 ## Grounded Generation
 
-The five highest-ranked chunks are labeled `[S1]` through `[S5]` and injected into the Ollama prompt. The model is instructed to answer only from this evidence and cite supported claims.
+Retrieved chunks (five by default, configurable with `--top-k`) are labeled `[S1]`, `[S2]`, and so on and injected into the Ollama prompt. The model is instructed to answer only from this evidence and cite supported claims.
 
 Answers without a valid retrieved-source citation are replaced with:
 
@@ -312,7 +320,7 @@ fitcoach/
   generation.py              Grounded prompting and Ollama generation
   evaluation.py              Retrieval and generation evaluation
   reporting.py               Human-readable CLI output
-  service.py                 Reusable API for a future UI or agent
+  service.py                 Reusable standalone RAG service
 requirements.txt             Independent Python RAG dependencies
 data/documents/              PDF corpus
 data/manifest.csv            Source metadata
@@ -330,11 +338,3 @@ coach = FitCoachService().initialize()
 result = coach.answer("How much protein should I eat?")
 print(result.text)
 ```
-
-Today puts the suggested workout first, then lists all saved routines directly below it: current-plan workouts first, followed by workouts grouped under their other saved plans. Each row starts that routine in one tap, using its source plan without activating it. The calendar and stats sit below the routine library. **Start another session** jumps to this list after a completed workout. Weekly schedules stay unchanged; completing an out-of-order rotation workout leaves that plan’s next workout in place.
-
-Active workouts hide the global header and bottom tabs to give set entry more space. The Today back control remains above the scrolling workout content and returns to the main screens without ending the session; sync/settings remains available beside the workout status. Completed workout logs retain the main navigation.
-
-Background synchronization does not show banners or popups. Its compact status indicator and Settings keep pending uploads, failures, and conflicts available for review.
-
-Finishing a workout with no checked-off sets offers **Discard workout** or **Keep workout**, rather than trying to save an empty history entry. Discarding uses the existing recoverable deletion and sync outbox, and does not advance the rotation. Entered values and notes are explicitly covered by the discard confirmation.
