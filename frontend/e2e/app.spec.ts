@@ -1105,9 +1105,12 @@ test('workout and Coach controls stay unobscured, and repeat set requires confir
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
   await page.setViewportSize({ width: 390, height: 844 });
-  const composer = await page.locator('.chat-composer').boundingBox();
-  const resume = await page.locator('.coach-resume').boundingBox();
-  expect(resume!.y + resume!.height).toBeLessThanOrEqual(composer!.y);
+  // Read both bounds in one frame while visualViewport resize events settle.
+  await expect.poll(() => page.evaluate(() => {
+    const composer = document.querySelector('.chat-composer')!.getBoundingClientRect();
+    const resume = document.querySelector('.coach-resume')!.getBoundingClientRect();
+    return resume.bottom <= composer.top;
+  })).toBe(true);
 });
 
 test('selecting another workout explains the active session instead of redirecting', async ({ page }) => {
@@ -1158,6 +1161,31 @@ test('large history keeps trends reachable and offers a searchable paginated jou
   await expect(journal.locator('.history-row')).toHaveCount(1);
   await journal.getByRole('link', { name: /Archive 60/ }).click();
   await expect(page.getByRole('heading', { name: 'Archive 60', exact: true })).toBeVisible();
+});
+
+test('sample Coach loads a bounded window and retains older messages across navigation', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(async () => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open('fitcoach-user-e2e-user');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result, tx = database.transaction('messages', 'readwrite');
+      for (let i = 0; i < 125; i++) tx.objectStore('messages').put({ id: `window-${String(i).padStart(3, '0')}`, role: 'user', text: `Fixture message ${i}`, createdAt: '2026-10-01T12:00:00.000Z', source: 'sample' });
+      tx.oncomplete = () => { database.close(); resolve(); }; tx.onerror = () => reject(tx.error);
+    };
+  }));
+  await openCoach(page);
+  await expect(page.locator('.message.user')).toHaveCount(100);
+  await expect(page.getByText('Fixture message 0', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Load older sample messages', exact: true }).click();
+  await expect(page.locator('.message.user')).toHaveCount(125);
+  await expect(page.getByText('Fixture message 0', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Load older sample messages', exact: true })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await openMainPage(page, 'History');
+  await expect(page.getByText('No completed workouts yet', { exact: true })).toBeVisible();
+  await openCoach(page);
+  await expect(page.locator('.message.user')).toHaveCount(125);
 });
 
 test('profile drafts stay isolated when switching accounts and remain recoverable', async ({ page }) => {

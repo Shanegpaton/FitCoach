@@ -1,6 +1,8 @@
 import { createContext, lazy, Suspense, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { CoachContextStatus } from '../coachContext';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
+import { useActiveSessions, useDatabaseQuery } from '../queries';
+import { readMessageWindow, recentCompleted } from '../historyQueries';
 import { ArrowRight, Check, MessageCircle, Plus, Send, Sparkles, X, Pencil, Trash2, ArrowLeft, Settings as SettingsIcon, Search } from 'lucide-react';
 import { db, applyProposal, cacheApprovedProposal, enqueueChange, putLocalChange, syncRootId } from '../db';
 import { assistantMessage, sampleCoach, isWorkoutProposal } from '../coach';
@@ -67,6 +69,9 @@ interface CoachContextValue {
   setWorkoutProposals: React.Dispatch<React.SetStateAction<WorkoutProposalMessage[]>>;
   mode: 'checking' | 'sample' | 'chatgpt';
   messages: Message[];
+  hasOlderMessages: boolean;
+  loadingMessages: boolean;
+  loadOlderMessages: () => void;
   allProposals: Proposal[];
   conversations: Array<{ id: string; title: string; updatedAt: string }>;
   activeConversationId: string;
@@ -89,7 +94,9 @@ const CoachContext = createContext<CoachContextValue | null>(null);
 
 export function CoachProvider({ children }: { children: ReactNode }) {
   const { userId, session, offlineAccess } = useAuth();
-  const { profile, plans, messages: sampleMessages, proposals, sessions, trainingDataReady, run } = useApp();
+  const { database, profile, plans, trainingDataReady, run } = useApp();
+  const location = useLocation();
+  const [messageLimit, setMessageLimit] = useState(100);
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -99,6 +106,15 @@ export function CoachProvider({ children }: { children: ReactNode }) {
     const cached = localStorage.getItem(`fitcoach:${userId}:coach-mode`);
     return (cached === 'chatgpt' || cached === 'sample') ? cached : 'checking';
   });
+  const sampleEnabled = mode === 'sample' && (location.pathname === '/coach' || sending);
+  const messageWindow = useDatabaseQuery(database, database => sampleEnabled ? readMessageWindow(database, messageLimit) : Promise.resolve({ messages: [], hasOlder: false }), [sampleEnabled, messageLimit]);
+  const sampleMessages = messageWindow?.messages ?? [];
+  const messageIds = JSON.stringify(sampleMessages.map(m => m.id));
+  const localProposals = useDatabaseQuery(database, database => sampleEnabled && sampleMessages.length ? database.proposals.where('messageId').anyOf(JSON.parse(messageIds) as string[]).toArray() : Promise.resolve([]), [sampleEnabled, messageIds]);
+  const proposals = localProposals ?? [];
+  const recentWorkoutWindow = useDatabaseQuery(database, database => sampleEnabled ? recentCompleted(database, 5) : Promise.resolve([]), [sampleEnabled]);
+  const recentWorkouts = recentWorkoutWindow ?? [];
+  const sampleLoading = sampleEnabled && (messageWindow === undefined || localProposals === undefined || recentWorkoutWindow === undefined);
   const [review, setReview] = useState<Proposal | null>(null);
   const [conversations, setConversations] = useState<Array<{ id: string; title: string; updatedAt: string }>>([]);
   const [activeConversationId, setActiveConversationId] = useState('');
@@ -295,7 +311,7 @@ export function CoachProvider({ children }: { children: ReactNode }) {
 
   const send = async (value = text) => {
     const content = value.trim();
-    if (!content || sendLock.current || mode === 'checking' || (recovery && recovery !== 'failed')) return;
+    if (!content || sampleLoading || sendLock.current || mode === 'checking' || (recovery && recovery !== 'failed')) return;
     const turnConversationId = activeConversationId;
     const turnMessages = activeMessages;
     const turnScope = scope.current;
@@ -324,7 +340,7 @@ export function CoachProvider({ children }: { children: ReactNode }) {
           messages: [...turnMessages, user],
           profile,
           plan: plans.find(p => p.active),
-          recentWorkouts: sessions.filter(s => s.status === 'completed').slice(-5),
+          recentWorkouts: [...recentWorkouts].reverse(),
           conversationId: isLive ? turnConversationId : undefined,
           requestId: isLive ? pendingTurn.current?.requestId : undefined,
         }, partial => {
@@ -451,6 +467,9 @@ export function CoachProvider({ children }: { children: ReactNode }) {
         workoutProposals,
         setWorkoutProposals,
         messages: activeMessages,
+        hasOlderMessages: mode === 'sample' && Boolean(messageWindow?.hasOlder),
+        loadingMessages: sampleLoading,
+        loadOlderMessages: () => setMessageLimit(value => value + 100),
         allProposals,
         conversations,
         activeConversationId,
@@ -482,10 +501,13 @@ export function useCoach() {
 
 export function Coach({ syncLabel }: { syncLabel: string }) {
   const { userId, session } = useAuth();
-  const { profile, plans, exercises, sessions, trainingDataReady, run } = useApp();
+  const { database, profile, plans, exercises, trainingDataReady, run } = useApp();
   const {
     mode,
     messages,
+    hasOlderMessages,
+    loadingMessages,
+    loadOlderMessages,
     allProposals,
     workoutProposals,
     setWorkoutProposals,
@@ -512,9 +534,10 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
   const [deletingChat, setDeletingChat] = useState<{ id: string; title: string } | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
   const composer = useRef<HTMLTextAreaElement>(null);
-  const activeWorkout = sessions.filter(item => item.status === 'active').sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+  const activeWorkout = useActiveSessions(database)?.[0];
+  const olderScroll = useRef<{ height: number; top: number } | null>(null);
   const activeChat = conversations.find(item => item.id === activeConversationId);
-  const blocked = sending || (recovery !== null && recovery !== 'failed') || mode === 'checking' || (mode === 'chatgpt' && !activeConversationId);
+  const blocked = loadingMessages || sending || (recovery !== null && recovery !== 'failed') || mode === 'checking' || (mode === 'chatgpt' && !activeConversationId);
   useEffect(() => {
     const input = composer.current;
     if (input) { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 144)}px`; }
@@ -536,10 +559,17 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
   }, [initCoach]);
 
   useEffect(() => {
+    if (olderScroll.current) {
+      if (loadingMessages) return;
+      const scroll = scrollPane.current;
+      if (scroll) scroll.scrollTop = olderScroll.current.top + scroll.scrollHeight - olderScroll.current.height;
+      olderScroll.current = null;
+      return;
+    }
     if (!messages.length && !sending) { following.current = true; setUnreadReply(false); scrollPane.current?.scrollTo(0, 0); return; }
     if (following.current) bottom.current?.scrollIntoView({ behavior: sending || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'end' });
     else if (!sending) setUnreadReply(true);
-  }, [messages.length, messages.at(-1)?.text, sending]);
+  }, [messages.length, messages.at(-1)?.text, sending, loadingMessages]);
 
   return (
     <div className="page coach-page">
@@ -557,7 +587,7 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
       <div className="coach-scroll" ref={scrollPane}>
     {mode === 'chatgpt' && <CoachContextStatus key={`${userId}:${activeConversationId}`} conversationId={activeConversationId} sending={sending} />}
 
-      {messages.length === 0 && (
+      {messages.length === 0 && !loadingMessages && mode !== 'checking' && (
         <div className="coach-welcome">
           <h2>What would help today?</h2>
           <p>{mode === 'chatgpt' ? 'Talk through your training, adjust your plan, or review a workout.' : <>These are sample replies. <Link to="/settings#coach-connection">Connect ChatGPT</Link> for online coaching.</>}</p>
@@ -575,7 +605,14 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
         </div>
       )}
 
-      <div className="messages" aria-busy={sending}>
+      <div className="messages" aria-busy={sending || loadingMessages || mode === 'checking'}>
+        {hasOlderMessages && <button className="button secondary" disabled={loadingMessages || sending} onClick={() => {
+          const scroll = scrollPane.current;
+          if (scroll) olderScroll.current = { height: scroll.scrollHeight, top: scroll.scrollTop };
+          following.current = false;
+          loadOlderMessages();
+        }}>Load older sample messages</button>}
+        {(loadingMessages || mode === 'checking') && <p className="field-hint" role="status">Loading messages…</p>}
         {messages.map(message => {
           const proposal = allProposals.find(p => p.messageId === message.id);
           const workoutProposal = workoutProposals.find(p => p.messageId === message.id);

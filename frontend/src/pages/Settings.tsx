@@ -1,6 +1,7 @@
 import { TrainingFields } from '../TrainingFields';
 import { useState, type FormEvent } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useDatabaseQuery } from '../queries';
 import { ArrowLeft, ArrowRight, Check, Download, HardDrive, RefreshCw, ShieldCheck, Smartphone, Upload } from 'lucide-react';
 import { Link } from 'react-router';
 import { backupSchema, profileSchema, type Backup, type Profile } from '../domain';
@@ -30,7 +31,8 @@ export function Onboarding() {
 }
 
 export function Settings() {
-  const { profile, run, notify, sessions } = useApp();
+  const { profile, run, notify, database } = useApp();
+  const sessionCount = useDatabaseQuery(database, database => database.sessions.count());
   const { draft, base, setDraft, reset, dirty, durable, changedElsewhere, keepDraft } = useProfileDraft(db.name, profile);
   const [saving, setSaving] = useState(false);
   const [backup, setBackup] = useState<Backup | null>(null);
@@ -105,7 +107,7 @@ export function Settings() {
     <CoachMemorySettings />
     <section id="install-app" className="settings-card"><SectionTitle title="Install FitCoach"><Smartphone size={20} /></SectionTitle><p>Install FitCoach on your home screen after opening it once online. Your plans, logs, timers, and history work offline.</p><div className="install-steps"><div><p><strong>iPhone / iPad</strong>Open in Safari, tap Share, then Add to Home Screen.</p></div><div><p><strong>Android</strong>Open in Chrome, then choose Install app or Add to Home screen in the browser menu.</p></div></div><p className="field-hint">Installation requires HTTPS on phones. ChatGPT Coach requires an online connection and granted plan usage.</p></section>
 
-    {backup && <Modal title="Replace local data?" onClose={() => setBackup(null)}><p>This backup contains {backup.plans.length} plans and {backup.sessions.length} sessions. Importing replaces the data currently stored on this device, including {sessions.length} sessions.</p><p className="field-hint">Export your current data first if you want to keep it.</p><div className="action-row"><button className="button secondary" onClick={exportFile}>Export current data</button><button className="button primary" disabled={busy} onClick={async () => {
+    {backup && <Modal title="Replace local data?" onClose={() => setBackup(null)}><p>This backup contains {backup.plans.length} plans and {backup.sessions.length} sessions. Importing replaces the data currently stored on this device, including {sessionCount ?? '…'} sessions.</p><p className="field-hint">Export your current data first if you want to keep it.</p><div className="action-row"><button className="button secondary" onClick={exportFile}>Export current data</button><button className="button primary" disabled={busy} onClick={async () => {
       setBusy(true); if (await run(() => importBackup(backup), 'Backup imported')) { reset(backup.profile); setBackup(null); } setBusy(false);
     }}>{busy ? 'Importing…' : 'Replace & import'}</button></div></Modal>}
     {reviewed && <ConflictReview key={reviewed.id} conflict={reviewed} onClose={() => setReviewId(null)} onResolved={message => {

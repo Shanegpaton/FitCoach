@@ -2,15 +2,17 @@ import { useRef, useState } from 'react';
 import { ArrowRight, ArrowUpRight, CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Dumbbell, Flame, Info, MoveRight, Plus, Sparkles } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
 import { createSession, db, putLocalChange } from '../db';
-import { atNoon, localDate, uid, weekdayNames, type Plan, type Workout } from '../domain';
+import { atNoon, localDate, uid, weekdayNames, type Plan, type Session, type Workout } from '../domain';
 import { completedStats, planWorkoutForDate, scheduledWorkout, sessionDuration, startSession, weeklyStats } from '../training';
 import { useApp } from '../state';
+import { useActiveSessions, useDatabaseQuery } from '../queries';
+import { completedInRange, recentCompleted, weekBounds } from '../historyQueries';
 import { Empty, Modal, SectionTitle } from '../ui';
 
 type Routine = { plan: Plan; workout: Workout };
 
 export function Today() {
-  const { plans, exercises, sessions, overrides, run } = useApp();
+  const { database, plans, exercises, overrides, run } = useApp();
   const navigate = useNavigate();
   const [date, setDate] = useState(localDate());
   const [moving, setMoving] = useState(false);
@@ -26,18 +28,25 @@ export function Today() {
   const getScheduled = (iso: string): Workout | undefined => planWorkoutForDate(plan, iso, overrides);
 
   const currentWorkout = getScheduled(date);
-  const activeSessions = sessions.filter(s => s.status === 'active').sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  const activeResult = useActiveSessions(database);
+  const activeSessions = activeResult ?? [];
+  const calendarBounds = weekBounds(date);
+  const currentBounds = weekBounds(localDate());
+  const calendarSessions = useDatabaseQuery(database, database => completedInRange(database, calendarBounds.start, calendarBounds.end).toArray(), [calendarBounds.start, calendarBounds.end]);
+  const completed = calendarSessions ?? [];
+  const weekSessions = useDatabaseQuery(database, database => completedInRange(database, currentBounds.start, currentBounds.end).toArray(), [currentBounds.start, currentBounds.end]) ?? [];
+  const completedCount = useDatabaseQuery(database, database => database.sessions.where('status').equals('completed').count());
+  const latest = useDatabaseQuery(database, async database => (await recentCompleted(database, 1))[0]);
   const active = activeSessions[0];
   const activeOnDate = activeSessions.find(s => s.date === date);
   const isActiveToday = active && date === localDate() && active.date === localDate();
   const sessionInProgress = activeOnDate ?? (isActiveToday ? active : undefined);
 
-  const completed = sessions.filter(s => s.status === 'completed');
   const completedOnDate = completed.find(s => s.date === date);
-  const week = weeklyStats(sessions, 1)[0];
+  const week = weeklyStats(weekSessions, 1)[0];
 
   const start = async (workoutToStart: Workout, sourcePlan = plan) => {
-    if (!sourcePlan) return;
+    if (!sourcePlan || !activeResult || !calendarSessions) return;
     if (active) {
       if (active.planId === sourcePlan.id && active.workoutId === workoutToStart.id) navigate(`/workout/${active.id}`);
       else setBlockedWorkout({ plan: sourcePlan, workout: workoutToStart });
@@ -51,6 +60,8 @@ export function Today() {
       navigate(`/workout/${session.id}`);
     }); } finally { starting.current = false; }
   };
+
+  if (!activeResult || !calendarSessions) return <div className="page" role="status">Opening your training day…</div>;
 
   const monday = atNoon(date);
   monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
@@ -244,7 +255,7 @@ export function Today() {
       <div className="stats-grid">
         <div><span>This week</span><strong>{week.workouts}<small> workouts</small></strong></div>
         <div><span>Working sets</span><strong>{week.sets}<small> this week</small></strong></div>
-        <div><span>All time</span><strong>{completed.length}<small> workouts</small></strong></div>
+        <div><span>All time</span><strong>{completedCount ?? '…'}<small> workouts</small></strong></div>
       </div>
 
       <Link to="/coach" className="coach-callout">
@@ -253,14 +264,14 @@ export function Today() {
         <MoveRight size={20} />
       </Link>
 
-      {completed.length > 0 && (
+      {latest && (
         <>
           <SectionTitle title="Last completed workout" />
           <Link
             className="recent-card"
-            to={`/workout/${completed.sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))[0].id}`}
+            to={`/workout/${latest.id}`}
           >
-            <HistoryPreview session={completed[0]} />
+            <HistoryPreview session={latest} />
             <ArrowUpRight size={20} />
           </Link>
         </>
@@ -328,7 +339,7 @@ export function Today() {
   );
 }
 
-function HistoryPreview({ session }: { session: import('../domain').Session }) {
+function HistoryPreview({ session }: { session: Session }) {
   return (
     <div>
       <span className="eyebrow">{atNoon(session.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>

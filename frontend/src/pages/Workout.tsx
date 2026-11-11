@@ -3,9 +3,11 @@ import { ArrowLeft, Check, CheckCheck, ChevronDown, Clock3, Dumbbell, Minus, Pau
 import { Link, useNavigate, useParams } from 'react-router';
 import { db, deleteLocalChange } from '../db';
 import { atNoon, formatLoad, newSet, sessionSchema, toKg, uid, type LoggedSet, type Profile, type Session, type Timer } from '../domain';
-import { completedStats, lastPerformance, nextSet, restAfterSet, timerRemaining } from '../training';
+import { completedStats, nextSet, restAfterSet, timerRemaining } from '../training';
 import { finishSession } from '../db';
 import { updateSession, useApp } from '../state';
+import { useDatabaseQuery } from '../queries';
+import { readPreviousPerformances } from '../historyQueries';
 import { ExercisePicker } from './Plans';
 import { Empty, Modal } from '../ui';
 import { SessionTiming } from '../SessionTiming';
@@ -27,8 +29,11 @@ function signalRestEnd() {
 
 export function WorkoutPage({ syncLabel }: { syncLabel: string }) {
   const { id } = useParams(); const navigate = useNavigate();
-  const { sessions, profile, run, notify } = useApp();
-  const session = sessions.find(s => s.id === id);
+  const { database, profile, run, notify } = useApp();
+  const loaded = useDatabaseQuery(database, async database => ({ session: id ? await database.sessions.get(id) : undefined }), [id]);
+  const session = loaded?.session;
+  const exerciseKey = JSON.stringify(session?.blocks.map(b => b.exerciseId) ?? []);
+  const performances = useDatabaseQuery(database, database => readPreviousPerformances(database, id ?? '', JSON.parse(exerciseKey) as string[]), [id, exerciseKey]);
   const [expanded, setExpanded] = useState(0);
   const [editing, setEditing] = useState(false);
   const [substitute, setSubstitute] = useState<number | 'new' | null>(null);
@@ -39,6 +44,7 @@ export function WorkoutPage({ syncLabel }: { syncLabel: string }) {
   const [timerSetup, setTimerSetup] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
   const pendingWrites = useRef(0);
+  if (!loaded) return <div className="page" role="status">Opening workout…</div>;
   if (!session) return <div className="page"><Empty title="Workout not found" text="This workout may not exist in the current backup." action="Back to Today" to="/" /></div>;
   const active = session.status === 'active';
   const editable = active || editing;
@@ -90,12 +96,12 @@ export function WorkoutPage({ syncLabel }: { syncLabel: string }) {
     {editable && <p className={`save-status ${saveStatus === 'error' ? 'danger' : ''}`} role="status">{saveStatus === 'saving' ? 'Saving on this device…' : saveStatus === 'error' ? 'A change could not be saved. Check the error and retry.' : 'Saved on this device'}</p>}
     <SessionTiming session={session} />
     <div className="logging-blocks">{session.blocks.map((block, bi) => {
-      const previous = lastPerformance(sessions.filter(s => s.id !== session.id), block.exerciseId);
+      const previous = performances?.[block.exerciseId] ?? [];
       const expandedHere = expanded === bi;
       const count = block.sets.filter(s => s.done).length;
       return <section className={`logging-card ${expandedHere ? 'expanded' : ''}`} key={block.id} id={`block-${bi}`}><button className="logging-heading" aria-expanded={expandedHere} onClick={() => setExpanded(expandedHere ? -1 : bi)}><span className="exercise-icon"><Dumbbell size={21} /></span><div><strong>{block.name}</strong><small>{block.supersetId ? `Superset ${block.supersetId.replace('superset-', '')} · ` : ''}{count}/{block.sets.length} sets · {block.restSeconds}s rest</small></div><ChevronDown className={expandedHere ? 'rotated' : ''} size={19} /></button>
         {expandedHere && <div className="logging-body">
-          <div className="last-performance"><span>Last time</span><strong>{previous.length ? `${previous[0].kg !== null ? `${formatLoad(previous[0].kg, profile.unit)} ${profile.unit}` : 'BW'} × ${previous[0].reps} · ${previous.length} sets` : 'Your first logged session'}</strong>{editable && previous.length > 0 && <button className="text-button" onClick={() => update(s => {
+          <div className="last-performance"><span>Last time</span><strong>{previous.length ? `${previous[0].kg !== null ? `${formatLoad(previous[0].kg, profile.unit)} ${profile.unit}` : 'BW'} × ${previous[0].reps} · ${previous.length} sets` : performances ? 'Your first logged session' : 'Loading previous performance…'}</strong>{editable && previous.length > 0 && <button className="text-button" onClick={() => update(s => {
             const working = s.blocks[bi].sets.filter(set => set.kind !== 'warmup');
             working.forEach((set, i) => { const last = previous[i]; if (last && !set.done) { set.kg = last.kg; set.reps = last.reps; } });
           })}>Use previous</button>}</div>

@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useActiveSessions, useDatabaseQuery } from './queries';
 import { Link, Navigate, NavLink, Route, Routes, matchPath, useLocation } from 'react-router';
 import { Activity, ArrowUpRight, Dumbbell, History as HistoryIcon, LayoutGrid, LogOut, Settings as SettingsIcon, Sparkles, WifiOff } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
@@ -72,27 +72,31 @@ export function App() {
     resize(); viewport?.addEventListener('resize', resize); window.addEventListener('resize', resize);
     return () => { viewport?.removeEventListener('resize', resize); window.removeEventListener('resize', resize); document.documentElement.style.removeProperty('--app-height'); };
   }, []);
-  const data = useLiveQuery(async () => {
-    if (!auth.userId || readyForUser !== auth.userId) return undefined;
-    const [profile, exercises, plans, sessions, overrides, messages, proposals] = await Promise.all([
-      db.profile.get('profile'), db.exercises.toArray(), db.plans.toArray(), db.sessions.toArray(),
-      db.overrides.toArray(), db.messages.orderBy('createdAt').toArray(), db.proposals.toArray(),
+  const database = db;
+  const data = useDatabaseQuery(database, async database => {
+    if (!auth.userId || readyForUser !== auth.userId || database.ownerId !== auth.userId) return undefined;
+    const [profile, exercises, plans, overrides] = await Promise.all([
+      database.profile.get('profile'), database.exercises.toArray(), database.plans.toArray(), database.overrides.toArray(),
     ]);
-    return { profile: profile!, exercises, plans, sessions, overrides, messages, proposals } satisfies AppData;
+    return { database, profile: profile!, exercises, plans, overrides } satisfies AppData;
   }, [auth.userId, readyForUser]);
-  const localPending = useLiveQuery(async () => {
-    if (!auth.userId || readyForUser !== auth.userId) return 0;
-    return db.outbox.where('userId').equals(auth.userId).count();
+  const activeSessions = useActiveSessions(database);
+  const localPending = useDatabaseQuery(database, async database => {
+    if (!auth.userId || readyForUser !== auth.userId || database.ownerId !== auth.userId) return 0;
+    return database.outbox.where('userId').equals(auth.userId).count();
   }, [auth.userId, readyForUser]) ?? 0;
   useEffect(() => {
     if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: 'start' });
     else { document.getElementById('main-content')?.scrollTo(0, 0); window.scrollTo(0, 0); }
   }, [location.pathname, location.hash, Boolean(data)]);
-  const notify = (message: string, error = false) => setToast({ message, error });
-  const run = async (action: () => Promise<unknown>, success?: string) => {
+  const notify = useCallback((message: string, error = false) => setToast({ message, error }), []);
+  const run = useCallback(async (action: () => Promise<unknown>, success?: string) => {
     try { await action(); if (success) notify(success); return true; }
     catch (error) { notify(error instanceof ZodError ? error.issues[0]?.message ?? 'Check the entered values.' : errorMessage(error, 'Could not save. Your changes have not been saved.'), true); return false; }
-  };
+  }, [notify]);
+  const trainingDataReady = Boolean(syncStatus?.state === 'idle' && syncStatus.lastSuccessAt
+    && !syncStatus.pending && !syncStatus.failed && !syncStatus.conflicts && !localPending);
+  const contextValue = useMemo(() => data ? { ...data, trainingDataReady, notify, run } : null, [data, trainingDataReady, notify, run]);
   const finishLegacyReview = () => {
     if (legacyImportRunning.current || !auth.userId) return;
     localStorage.setItem(`fitcoach:${auth.userId}:legacy-reviewed`, 'yes');
@@ -124,18 +128,16 @@ export function App() {
   if (!auth.userId) return <div className="auth-screen"><span className="brand-mark large">f.</span><h1>Sign in to FitCoach</h1><p>Sign in with Google to open your private training space. Once signed in on this device, your workouts stay available offline.</p>{!auth.configured && <div className="auth-config" role="status"><strong>Supabase setup needed</strong><span>Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in frontend/.env.local, then configure Google OAuth in Supabase.</span></div>}<button className="button primary google-signin" disabled={!auth.configured || !online} onClick={() => void auth.signIn()}><GoogleMark />Continue with Google</button>{!online && <p className="field-hint">Connect to the internet to sign in for the first time.</p>}{auth.error && <p className="auth-error" role="alert">{auth.error}</p>}</div>;
   if (fatal) return <div className="startup"><h1>Storage is unavailable</h1><p>FitCoach needs browser storage to save workouts. Check storage permissions and available space, then retry.</p><details><summary>Details</summary>{fatal}</details><button className="button primary" onClick={() => window.location.reload()}>Retry</button></div>;
   if (!data) return <div className="startup"><span className="brand-mark">f.</span><p>Getting your training space ready…</p></div>;
-  const active = data.sessions.filter(s => s.status === 'active').sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+  const active = activeSessions?.[0];
   const workoutId = matchPath('/workout/:id', location.pathname)?.params.id;
-  const isActiveWorkout = data.sessions.some(item => item.id === workoutId && item.status === 'active');
+  const isActiveWorkout = activeSessions?.some(item => item.id === workoutId) ?? false;
   const focused = isCoach || isActiveWorkout;
   const syncLabel = !syncStatus ? 'Private training space' : syncStatus.state === 'offline'
     ? 'Offline · saved here' : syncStatus.conflicts ? `${syncStatus.conflicts} conflict${syncStatus.conflicts === 1 ? '' : 's'}`
       : syncStatus.failed ? `${syncStatus.failed} failed`
       : syncStatus.state === 'syncing' ? 'Syncing…' : syncStatus.state === 'error'
         ? 'Sync needs attention' : Math.max(syncStatus.pending, localPending) ? `${Math.max(syncStatus.pending, localPending)} pending` : 'Synced';
-  const trainingDataReady = Boolean(syncStatus?.state === 'idle' && syncStatus.lastSuccessAt
-    && !syncStatus.pending && !syncStatus.failed && !syncStatus.conflicts && !localPending);
-  return <AppContext.Provider value={{ ...data, trainingDataReady, notify, run }}>
+  return <AppContext.Provider value={contextValue}>
     <CoachProvider key={auth.userId}>
       <div className={`app-shell${isCoach ? ' coach-shell' : isActiveWorkout ? ' active-workout-shell' : ''}`}>
         <a className="skip-link" href="#main-content">Skip to content</a>
@@ -147,13 +149,7 @@ export function App() {
         {auth.error && <div className="connection-banner" role="status">{auth.error}{online && <button onClick={() => void auth.signIn()}>Sign in again</button>}</div>}
         {auth.offlineAccess && <div className="connection-banner">Offline access for this account. Workout logging stays local until you’re online and signed in.</div>}
         {needRefresh && <div className="connection-banner">A new version is ready. {active ? 'Finish your workout to update.' : <button onClick={() => run(() => updateServiceWorker(true))}>Update app</button>}</div>}
-        <main id="main-content" tabIndex={-1}><Routes>
-          <Route path="/auth/callback" element={<Navigate to="/" replace />} />
-          <Route path="/" element={<Today />} /><Route path="/plan" element={<Plans />} />
-          <Route path="/coach" element={<Coach syncLabel={syncLabel} />} /><Route path="/history" element={<Suspense fallback={<div className="page"><p className="field-hint">Opening your journal…</p></div>}><History /></Suspense>} />
-          <Route path="/workout/:id" element={<WorkoutPage syncLabel={syncLabel} />} /><Route path="/settings" element={<Settings key={auth.userId} />} />
-          <Route path="*" element={<div className="empty"><h1>Page not found</h1><Link to="/" className="button primary">Back to Today</Link></div>} />
-        </Routes></main>
+        <main id="main-content" tabIndex={-1}><AppRoutes key={auth.userId} syncLabel={syncLabel} userId={auth.userId} /></main>
         {!focused && active && !location.pathname.startsWith('/workout/') && <Link className="resume-bar" to={`/workout/${active.id}`}><span className="pulse" /><div><strong>Workout in progress</strong><small>{active.name}</small></div><span>Resume<ArrowUpRight size={18} /></span></Link>}
         {!focused && <nav className="bottom-nav" aria-label="Main navigation">
           {[['/', 'Today', Activity], ['/plan', 'Plan', LayoutGrid], ['/coach', 'Coach', Sparkles], ['/history', 'History', HistoryIcon]].map(([to, label, Icon]) => {
@@ -169,3 +165,13 @@ export function App() {
 }
 
 function GoogleMark() { return <svg aria-hidden="true" viewBox="0 0 48 48" width="19" height="19"><path fill="#4285F4" d="M43.6 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11a9.4 9.4 0 0 1-4.1 6.2v5.5h6.7c3.9-3.6 6-8.9 6-15.7Z"/><path fill="#34A853" d="M24 44c5.5 0 10.1-1.8 13.5-4.8l-6.7-5.5c-1.8 1.2-4 2-6.8 2-5.2 0-9.6-3.5-11.2-8.2H5.9v5.7A20 20 0 0 0 24 44Z"/><path fill="#FBBC05" d="M12.8 27.5a12 12 0 0 1 0-7V14.8H5.9a20 20 0 0 0 0 18.4l6.9-5.7Z"/><path fill="#EA4335" d="M24 12c3 0 5.7 1 7.8 3.1l5.9-5.9C34.1 5.9 29.5 4 24 4A20 20 0 0 0 5.9 14.8l6.9 5.7C14.4 15.5 18.8 12 24 12Z"/></svg>; }
+
+const AppRoutes = memo(function AppRoutes({ syncLabel, userId }: { syncLabel: string; userId: string }) {
+  return <Routes>
+          <Route path="/auth/callback" element={<Navigate to="/" replace />} />
+          <Route path="/" element={<Today />} /><Route path="/plan" element={<Plans />} />
+          <Route path="/coach" element={<Coach syncLabel={syncLabel} />} /><Route path="/history" element={<Suspense fallback={<div className="page"><p className="field-hint">Opening your journal…</p></div>}><History /></Suspense>} />
+          <Route path="/workout/:id" element={<WorkoutPage syncLabel={syncLabel} />} /><Route path="/settings" element={<Settings key={userId} />} />
+          <Route path="*" element={<div className="empty"><h1>Page not found</h1><Link to="/" className="button primary">Back to Today</Link></div>} />
+        </Routes>;
+});

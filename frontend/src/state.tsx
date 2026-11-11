@@ -1,10 +1,10 @@
 import { createContext, useContext } from 'react';
-import type { Exercise, Message, Plan, Profile, Proposal, ScheduleOverride, Session } from './domain';
-import { db, enqueueChange } from './db';
+import type { Exercise, Plan, Profile, ScheduleOverride, Session } from './domain';
+import { db, enqueueChange, type TrainingDB } from './db';
 
 export interface AppData {
-  profile: Profile; exercises: Exercise[]; plans: Plan[]; sessions: Session[];
-  overrides: ScheduleOverride[]; messages: Message[]; proposals: Proposal[];
+  database: TrainingDB; profile: Profile; exercises: Exercise[]; plans: Plan[];
+  overrides: ScheduleOverride[];
 }
 export interface AppState extends AppData {
   trainingDataReady: boolean;

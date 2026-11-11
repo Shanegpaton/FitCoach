@@ -29,6 +29,11 @@ export class TrainingDB extends Dexie {
           await outbox.put(change);
         }
       });
+    // Query indexes only: existing session/message snapshots and sync metadata stay intact.
+    this.version(4).stores({
+      sessions: 'id, status, date, [status+date+completedAt+id], [status+completedAt+id]',
+      messages: 'id, createdAt, [createdAt+id]',
+    });
   }
 }
 export type SyncEntity = 'profile' | 'exercises' | 'plans' | 'sessions' | 'schedule-overrides';
