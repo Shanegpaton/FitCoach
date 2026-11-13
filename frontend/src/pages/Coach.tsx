@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router';
 import { useActiveSessions, useDatabaseQuery } from '../queries';
 import { readMessageWindow, recentCompleted } from '../historyQueries';
 import { ArrowRight, Check, MessageCircle, Plus, Send, Sparkles, X, Pencil, Trash2, ArrowLeft, Settings as SettingsIcon, Search } from 'lucide-react';
-import { db, applyProposal, cacheApprovedProposal, putLocalChange, syncRootId } from '../db';
+import { db, applyProposal, putLocalChange } from '../db';
 import { assistantMessage, sampleCoach, isWorkoutProposal } from '../coach';
 import { BackendError, backendChatGPTRequest, backendRequest, liveCoach, type ChatGPTConnection } from '../chatgptVm';
 import { useAuth } from '../auth';
@@ -13,6 +13,7 @@ import { useApp } from '../state';
 import { PlanEditor } from './Plans';
 import { Modal, ProposalReadiness } from '../ui';
 import { WorkoutProposal } from './WorkoutProposal';
+import { decidePlanProposal } from '../planProposalDecision';
 import { CoachModelPicker } from './CoachModelPicker';
 import type { ServerProposal, ServerWorkoutProposal } from '../coach';
 
@@ -526,6 +527,20 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
     setServerProposals,
   } = useCoach();
 
+  const decisionScope = useRef('');
+  decisionScope.current = `${userId}:${activeConversationId}`;
+  useEffect(() => () => { decisionScope.current = ''; }, []);
+  const decideServerPlan = async (proposal: Proposal, accept: boolean) => {
+    const originScope = decisionScope.current;
+    const originDatabase = database;
+    if (!session || !navigator.onLine) throw new Error('Sign in online to review a plan proposal.');
+    const status = await decidePlanProposal(originDatabase, session.user.id, proposal, accept, trainingDataReady);
+    if (decisionScope.current === originScope) {
+      setServerProposals(items => items.map(item => item.id === proposal.id ? { ...item, status } : item));
+      window.dispatchEvent(new Event('fitcoach:sync-now'));
+    }
+  };
+
   const [chatsOpen, setChatsOpen] = useState(false);
   const [chatSearch, setChatSearch] = useState('');
   const [editingChat, setEditingChat] = useState<{ id: string; title: string } | null>(null);
@@ -671,35 +686,13 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
                             <button
                               className="button primary"
                               disabled={!trainingDataReady || !navigator.onLine}
-                              onClick={() => void run(async () => {
-                                if (!session || !trainingDataReady || !navigator.onLine) throw new Error('Connect and finish syncing before approving a plan proposal.');
-                                const pending = await db.outbox.where('userId').equals(session.user.id).count();
-                                const conflicts = await db.sync.where('userId').equals(session.user.id).filter(item => item.kind === 'conflict').count();
-                                const root = proposal.targetPlanId ? await db.sync.get(syncRootId(session.user.id, 'plans', proposal.targetPlanId)) : undefined;
-                                if (pending || conflicts || (proposal.sourceEtag && root?.etag !== proposal.sourceEtag)) throw new Error('Sync all training changes and resolve conflicts before approving. If the plan changed, ask Coach for a fresh proposal.');
-                                let applied: { plan: import('../domain').Plan; etag: string; proposal: { status: string } };
-                                try {
-                                  applied = await backendRequest(session.user.id, `coach/proposals/${proposal.serverProposalId}/approve`, { method: 'POST' });
-                                } catch (error) {
-                                  const latest = await backendRequest<{ status: 'pending' | 'approved' | 'rejected' | 'expired' | 'invalidated' }>(session.user.id, `coach/proposals/${proposal.serverProposalId}`).catch(() => undefined);
-                                  if (latest && latest.status !== 'pending') await db.proposals.put({ ...proposal, status: latest.status === 'approved' ? 'applied' : latest.status });
-                                  throw error;
-                                }
-                                await cacheApprovedProposal(proposal, applied.plan, applied.etag);
-                                setServerProposals(items => items.map(item => item.id === proposal.id ? { ...item, status: 'applied' } : item));
-                                window.dispatchEvent(new Event('fitcoach:sync-now'));
-                              }, 'Proposal approved and synchronized')}
+                              onClick={() => void run(() => decideServerPlan(proposal, true))}
                             >
                               <Check size={16} />Approve changes
                             </button>
                             <button
                               className="button"
-                              onClick={() => void run(async () => {
-                                if (!session) throw new Error('Sign in to reject this proposal.');
-                                await backendRequest(session.user.id, `coach/proposals/${proposal.serverProposalId}/reject`, { method: 'POST' });
-                                await putLocalChange('proposals', { ...proposal, status: 'rejected' as const }, db.proposals);
-                                setServerProposals(items => items.map(item => item.id === proposal.id ? { ...item, status: 'rejected' } : item));
-                              })}
+                              onClick={() => void run(() => decideServerPlan(proposal, false))}
                             >
                               Reject changes
                             </button>

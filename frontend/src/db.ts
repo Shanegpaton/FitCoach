@@ -193,17 +193,26 @@ export async function applyProposal(proposal: Proposal, database = db) {
 /** Cache a plan already committed by the authenticated proposal endpoint. The
  * server write advances its ordinary sync cursor/version, so do not enqueue a
  * second write that would race or duplicate the committed operation. */
-export async function cacheApprovedProposal(proposal: Proposal, plan: Plan, etag: string, database = db) {
+export async function cacheApprovedProposal(proposal: Proposal, plan: Plan, etag: string, database: TrainingDB) {
   const validated = planSchema.parse(plan);
   if (!database.ownerId) throw new Error('Sign in to apply a Coach proposal.');
   await database.transaction('rw', [database.plans, database.proposals, database.sync, database.outbox], async () => {
     const pending = await database.outbox.where('[userId+entity+entityId]')
       .equals([database.ownerId!, 'plans', validated.id]).toArray();
     if (pending.length) throw new Error('Your plan has unsynchronized changes. Sync them before approving.');
-    await database.plans.put(validated);
     const rootId = syncRootId(database.ownerId!, 'plans', validated.id);
     const previous = await database.sync.get(rootId);
     const version = Number(etag.replaceAll('"', ''));
+    if (!Number.isSafeInteger(version) || version <= 0) throw new Error('Invalid approved plan version.');
+    const previousVersion = Math.max(previous?.version ?? 0, Number(previous?.etag?.replaceAll('"', '')) || 0);
+    // Another tab can finish syncing while the approval response is in flight.
+    // Keep that newer snapshot (including a deletion) and only mark the draft decided.
+    if (previous?.remoteDeleted || previousVersion >= version ||
+        (proposal.sourceEtag && previous?.etag && previous.etag !== proposal.sourceEtag)) {
+      await database.proposals.put({ ...proposal, plan: validated, status: 'applied' });
+      return;
+    }
+    await database.plans.put(validated);
     await database.sync.put({ ...previous, id: rootId, userId: database.ownerId!, kind: 'root',
       entity: 'plans', entityId: validated.id, etag, version, remoteDeleted: false,
       updatedAt: new Date().toISOString() });
