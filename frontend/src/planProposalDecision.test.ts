@@ -45,6 +45,21 @@ describe('account-scoped plan decisions', () => {
 });
 
 describe('approval response freshness', () => {
+  it('caches a fresh response based on the current source ETag and replays safely', async () => {
+    const database = new TrainingDB(`approval-${uid()}`, 'account-a');
+    try {
+      await initialize(database);
+      const proposal = { ...draft(), type: 'modify' as const, sourceEtag: '"1"' };
+      await database.plans.put({ ...proposal.plan, name: 'Before approval' });
+      await database.sync.put({ id: syncRootId('account-a', 'plans', proposal.plan.id), userId: 'account-a',
+        kind: 'root', entity: 'plans', entityId: proposal.plan.id, etag: '"1"', version: 1 });
+      await cacheApprovedProposal(proposal, proposal.plan, '"2"', database);
+      await cacheApprovedProposal(proposal, proposal.plan, '"2"', database);
+      expect(await database.plans.get(proposal.plan.id)).toEqual(proposal.plan);
+      expect((await database.sync.get(syncRootId('account-a', 'plans', proposal.plan.id)))?.etag).toBe('"2"');
+      expect(await database.outbox.count()).toBe(0);
+    } finally { await database.delete(); }
+  });
   it.each(['newer', 'deleted', 'different-source'] as const)('preserves a %s synchronized root', async situation => {
     const database = new TrainingDB(`approval-${uid()}`, 'account-a');
     try {
