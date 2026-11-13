@@ -68,6 +68,45 @@ describe('durable local data', () => {
 });
 
 describe('backup safety and proposal review', () => {
+  it('round-trips cached live proposals without exporting server messages or requiring stale exercise definitions', async () => {
+    const livePlan = starterPlan(defaultProfile);
+    livePlan.workouts[0].blocks[0].exerciseId = 'removed-custom-exercise';
+    const proposal: Proposal = { id: uid(), messageId: 'server-only-message', plan: livePlan,
+      status: 'pending', baseRevision: null, serverProposalId: uid() };
+    await db.proposals.put(proposal);
+    const backup = await exportBackup(db);
+    expect(backup.messages).toEqual([]);
+    expect(backup.proposals).toEqual([proposal]);
+    await db.proposals.clear();
+    await importBackup(backup, db);
+    expect(await db.proposals.get(proposal.id)).toEqual(proposal);
+  });
+  it('preserves cached live proposals in the recovery copy before importing a replacement', async () => {
+    const account = new TrainingDB(`backup-recovery-${uid()}`, 'user-a');
+    try {
+      await initialize(account);
+      const replacement = await exportBackup(account);
+      const proposal: Proposal = { id: uid(), messageId: 'server-only-message', plan: starterPlan(defaultProfile),
+        status: 'rejected', baseRevision: null, serverProposalId: uid() };
+      await account.proposals.put(proposal);
+      await importBackup(replacement, account);
+      expect(await account.proposals.count()).toBe(0);
+      const recovery = await account.sync.filter(row => row.kind === 'recovery' && row.entityId === 'all').first();
+      expect(backupSchema.parse(recovery?.payload).proposals).toEqual([proposal]);
+    } finally { await account.delete(); }
+  });
+  it('retains strict message and exercise reference checks for sample drafts and shape validation for live caches', async () => {
+    const backup = await exportBackup(db);
+    const sample: Proposal = { id: uid(), messageId: 'missing-local-message', plan: starterPlan(defaultProfile), status: 'pending', baseRevision: null };
+    expect(backupSchema.safeParse({ ...backup, proposals: [sample] }).success).toBe(false);
+    const message = { id: sample.messageId, role: 'assistant', text: 'Sample plan', createdAt: new Date().toISOString() };
+    const missingExercise = structuredClone(sample);
+    missingExercise.plan.workouts[0].blocks[0].exerciseId = 'missing-exercise';
+    expect(backupSchema.safeParse({ ...backup, messages: [message], proposals: [missingExercise] }).success).toBe(false);
+    const malformed = { ...sample, serverProposalId: uid(), plan: { ...sample.plan, workouts: [] } };
+    expect(backupSchema.safeParse({ ...backup, proposals: [malformed] }).success).toBe(false);
+  });
+
   it('round-trips all saved entities and leaves exported snapshots independent', async () => {
     const p = starterPlan(defaultProfile); await savePlan(p, db);
     const s = startSession(p, p.workouts[0], catalog); await createSession(s, db);

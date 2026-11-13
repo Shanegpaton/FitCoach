@@ -93,7 +93,10 @@ export const backupSchema = z.object({
       ctx.addIssue({ code: 'custom', message: `Duplicate IDs in ${table}` });
   }
   const exerciseIds = new Set(backup.exercises.map(ex => ex.id));
-  const plans = [...backup.plans, ...backup.proposals.map(proposal => proposal.plan)];
+  // Server proposals are display snapshots, not locally actionable drafts. Their
+  // messages and exercise definitions can remain server-side or have been deleted.
+  // Keep payload validation, but require local references only for sample drafts.
+  const plans = [...backup.plans, ...backup.proposals.filter(proposal => !proposal.serverProposalId).map(proposal => proposal.plan)];
   for (const plan of plans) {
     if (plan.cursor >= plan.workouts.length) ctx.addIssue({ code: 'custom', message: 'Invalid rotation cursor' });
     if (new Set(plan.workouts.map(w => w.id)).size !== plan.workouts.length)
@@ -107,7 +110,7 @@ export const backupSchema = z.object({
     if (!backup.plans.some(plan => plan.id === override.planId && plan.workouts.some(w => w.id === override.workoutId)))
       ctx.addIssue({ code: 'custom', message: 'Schedule override references a missing workout' });
   }
-  for (const proposal of backup.proposals) if (!backup.messages.some(m => m.id === proposal.messageId))
+  for (const proposal of backup.proposals) if (!proposal.serverProposalId && !backup.messages.some(m => m.id === proposal.messageId))
     ctx.addIssue({ code: 'custom', message: 'Proposal references a missing message' });
 });
 
