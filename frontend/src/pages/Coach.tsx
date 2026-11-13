@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router';
 import { useActiveSessions, useDatabaseQuery } from '../queries';
 import { readMessageWindow, recentCompleted } from '../historyQueries';
 import { ArrowRight, Check, MessageCircle, Plus, Send, Sparkles, X, Pencil, Trash2, ArrowLeft, Settings as SettingsIcon, Search } from 'lucide-react';
-import { db, applyProposal, cacheApprovedProposal, enqueueChange, putLocalChange, syncRootId } from '../db';
+import { db, applyProposal, cacheApprovedProposal, putLocalChange, syncRootId } from '../db';
 import { assistantMessage, sampleCoach, isWorkoutProposal } from '../coach';
 import { BackendError, backendChatGPTRequest, backendRequest, liveCoach, type ChatGPTConnection } from '../chatgptVm';
 import { useAuth } from '../auth';
@@ -392,11 +392,9 @@ export function CoachProvider({ children }: { children: ReactNode }) {
             } : item));
           }
         } else {
-          await turnDatabase.transaction('rw', [turnDatabase.messages, turnDatabase.proposals, turnDatabase.outbox], async () => {
+          await turnDatabase.transaction('rw', [turnDatabase.messages, turnDatabase.proposals], async () => {
             await turnDatabase.messages.put(assistant);
             if (proposal) await turnDatabase.proposals.add(proposal);
-            await enqueueChange('messages', assistant.id, 'upsert', assistant, turnDatabase);
-            if (proposal) await enqueueChange('proposals', proposal.id, 'upsert', proposal, turnDatabase);
           });
         }
       });
