@@ -63,6 +63,17 @@ function ProposalOperation({ operation, before, after, exercises, unit }: {
   return <div className="proposal-change"><strong>{title}</strong><span>{detail}</span></div>;
 }
 
+type ConversationPage = {
+  messages: Array<Message & { metadata?: { artifacts?: Array<{ id: string; type: string }> } }>;
+  nextBefore?: number | null;
+};
+function mergeMessages(earlier: Message[], later: Message[]) {
+  return [...new Map([...earlier, ...later].map(message => [message.id, message])).values()];
+}
+function liveMessages(messages: ConversationPage['messages']): Message[] {
+  return messages.map(message => ({ id: message.id, role: message.role, text: message.text,
+    createdAt: message.createdAt, source: message.role === 'assistant' ? 'chatgpt' : undefined }));
+}
 type WorkoutProposalMessage = ServerWorkoutProposal & { messageId: string };
 
 interface CoachContextValue {
@@ -120,6 +131,8 @@ export function CoachProvider({ children }: { children: ReactNode }) {
   const [conversations, setConversations] = useState<Array<{ id: string; title: string; updatedAt: string }>>([]);
   const [activeConversationId, setActiveConversationId] = useState('');
   const [serverMessages, setServerMessages] = useState<Message[]>([]);
+  const [historyStatus, setHistoryStatus] = useState({ scope: '', nextBefore: null as number | null, loading: false });
+  const history = useRef({ scope: '', initialized: false, nextBefore: null as number | null, loading: false });
   const [serverProposals, setServerProposals] = useState<Proposal[]>([]);
   const [workoutProposals, setWorkoutProposals] = useState<WorkoutProposalMessage[]>([]);
   const [recovery, setRecovery] = useState<'checking' | 'started' | 'failed' | 'unknown' | null>(null);
@@ -194,6 +207,48 @@ export function CoachProvider({ children }: { children: ReactNode }) {
     return () => { current = false; };
   }, [mode, userId, visitedCoach]);
 
+  const loadArtifacts = async (messages: ConversationPage['messages'], requestScope: string) => {
+    if (!userId) return;
+    const refs = messages.flatMap(message => (message.metadata?.artifacts ?? []).map(artifact => ({ messageId: message.id, artifact })));
+    const results = await Promise.allSettled(refs.filter(ref => ['training_plan_proposal', 'workout_edit_proposal'].includes(ref.artifact.type)).map(async (ref): Promise<Proposal | WorkoutProposalMessage> => {
+      const item = await backendRequest<ServerProposal>(userId, `coach/proposals/${ref.artifact.id}`);
+      if (isWorkoutProposal(item)) return { ...item, messageId: ref.messageId };
+      return {
+        id: item.id, messageId: ref.messageId, plan: item.plan, status: item.status === 'approved' ? 'applied' as const : item.status,
+        baseRevision: null, serverProposalId: item.id, type: item.type, targetPlanId: item.targetPlanId,
+        beforePlan: item.beforePlan, sourceEtag: item.sourceEtag, operations: item.operations,
+        assumptions: item.assumptions, summary: item.summary, expiresAt: item.expiresAt,
+      } satisfies Proposal;
+    }));
+    if (scope.current === requestScope) {
+      const loaded = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
+      setServerProposals(existing => [...new Map([...existing, ...loaded.filter((item): item is Proposal => !('session' in item))].map(item => [item.serverProposalId ?? item.id, item])).values()]);
+      setWorkoutProposals(existing => [...new Map([...existing, ...loaded.filter((item): item is WorkoutProposalMessage => 'session' in item)].map(item => [item.id, item])).values()]);
+    }
+  };
+  const loadOlderMessages = async () => {
+    if (mode === 'sample') { setMessageLimit(value => value + 100); return; }
+    const requestScope = scope.current;
+    const state = history.current;
+    if (!userId || !activeConversationId || state.scope !== requestScope || state.loading || state.nextBefore === null) return;
+    state.loading = true;
+    setHistoryStatus({ scope: requestScope, nextBefore: state.nextBefore, loading: true });
+    try {
+      const page = await backendRequest<ConversationPage>(userId, `coach/conversations/${activeConversationId}?limit=100&before=${state.nextBefore}`);
+      if (scope.current !== requestScope || history.current !== state) return;
+      state.nextBefore = page.nextBefore ?? null;
+      setServerMessages(existing => mergeMessages(liveMessages(page.messages), existing));
+      await loadArtifacts(page.messages, requestScope);
+    } catch (error) {
+      if (scope.current === requestScope) await run(async () => { throw error; });
+    } finally {
+      if (scope.current === requestScope && history.current === state) {
+        state.loading = false;
+        setHistoryStatus({ scope: requestScope, nextBefore: state.nextBefore, loading: false });
+      }
+    }
+  };
+
   // Messages and turn recovery for active conversation
   useEffect(() => {
     if (mode !== 'chatgpt' || !userId || !activeConversationId) {
@@ -201,6 +256,12 @@ export function CoachProvider({ children }: { children: ReactNode }) {
       return;
     }
     let current = true;
+    const requestScope = scope.current;
+    if (history.current.scope !== requestScope) {
+      history.current = { scope: requestScope, initialized: false, nextBefore: null, loading: false };
+      setHistoryStatus({ scope: requestScope, nextBefore: null, loading: true });
+    }
+    const historyState = history.current;
     localStorage.setItem(`fitcoach:${userId}:coach-active-conversation`, activeConversationId);
     const pendingKey = `fitcoach:${userId}:coach-pending-turn:${activeConversationId}`;
     const pendingText = localStorage.getItem(pendingKey);
@@ -236,35 +297,21 @@ export function CoachProvider({ children }: { children: ReactNode }) {
           }
         } else if (current) setRecovery(null);
 
-        const conversation = await backendRequest<{
-          messages: Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: string; metadata?: { artifacts?: Array<{ id: string; type: string }> } }>
-        }>(userId, `coach/conversations/${activeConversationId}?limit=100`);
-
-        if (!current || sendLock.current) return;
-        setServerMessages(conversation.messages.map(message => ({
-          id: message.id, role: message.role, text: message.text,
-          createdAt: message.createdAt, source: message.role === 'assistant' ? 'chatgpt' : undefined,
-        })));
-
-        const refs = conversation.messages.flatMap(message => (message.metadata?.artifacts ?? []).map(artifact => ({ messageId: message.id, artifact })));
-        const results = await Promise.allSettled(refs.filter(ref => ['training_plan_proposal', 'workout_edit_proposal'].includes(ref.artifact.type)).map(async (ref): Promise<Proposal | WorkoutProposalMessage> => {
-          const item = await backendRequest<ServerProposal>(userId, `coach/proposals/${ref.artifact.id}`);
-          if (isWorkoutProposal(item)) return { ...item, messageId: ref.messageId };
-          return {
-            id: item.id, messageId: ref.messageId, plan: item.plan, status: item.status === 'approved' ? 'applied' as const : item.status,
-            baseRevision: null, serverProposalId: item.id, type: item.type, targetPlanId: item.targetPlanId,
-            beforePlan: item.beforePlan, sourceEtag: item.sourceEtag, operations: item.operations,
-            assumptions: item.assumptions, summary: item.summary, expiresAt: item.expiresAt,
-          } satisfies Proposal;
-        }));
-        if (current) {
-          const loaded = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
-          setServerProposals(loaded.filter((item): item is Proposal => !('session' in item)));
-          setWorkoutProposals(loaded.filter((item): item is WorkoutProposalMessage => 'session' in item));
+        const conversation = await backendRequest<ConversationPage>(userId, `coach/conversations/${activeConversationId}?limit=100`);
+        if (!current || scope.current !== requestScope || sendLock.current) return;
+        setServerMessages(existing => mergeMessages(existing, liveMessages(conversation.messages)));
+        if (!historyState.initialized) {
+          historyState.initialized = true;
+          historyState.nextBefore = conversation.nextBefore ?? null;
+          setHistoryStatus({ scope: requestScope, nextBefore: historyState.nextBefore, loading: false });
         }
+
+        await loadArtifacts(conversation.messages, requestScope);
       } catch (error) {
         if (current) void run(async () => { throw error; });
       } finally {
+        if (current && scope.current === requestScope && !historyState.initialized)
+          setHistoryStatus({ scope: requestScope, nextBefore: null, loading: false });
         refreshing = false;
       }
     };
@@ -306,7 +353,7 @@ export function CoachProvider({ children }: { children: ReactNode }) {
     return () => { current = false; window.removeEventListener('focus', visible); document.removeEventListener('visibilitychange', visible); };
   }, [userId]);
 
-  const savedMessages = mode === 'chatgpt' ? serverMessages : sampleMessages;
+  const savedMessages = mode === 'chatgpt' ? (history.current.scope === scope.current ? serverMessages : []) : sampleMessages;
   const activeMessages = [...savedMessages, ...(pendingMessages?.scope === scope.current ? pendingMessages.messages.filter(message => !savedMessages.some(saved => saved.id === message.id)) : [])];
   const allProposals = [...proposals, ...serverProposals];
 
@@ -354,10 +401,7 @@ export function CoachProvider({ children }: { children: ReactNode }) {
           if (reply.replayed && userId) {
             const conversation = await backendRequest<{ messages: Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: string }> }>(userId, `coach/conversations/${turnConversationId}?limit=100`);
             if (scope.current === turnScope) {
-              setServerMessages(conversation.messages.map(message => ({
-                id: message.id, role: message.role, text: message.text,
-                createdAt: message.createdAt, source: message.role === 'assistant' ? 'chatgpt' : undefined,
-              })));
+              setServerMessages(existing => mergeMessages(existing, liveMessages(conversation.messages)));
             }
           } else if (scope.current === turnScope) {
             setServerMessages(existing => [...existing.filter(message => message.id !== persistedUser.id && message.id !== assistant.id), persistedUser, assistant]);
@@ -466,9 +510,9 @@ export function CoachProvider({ children }: { children: ReactNode }) {
         workoutProposals,
         setWorkoutProposals,
         messages: activeMessages,
-        hasOlderMessages: mode === 'sample' && Boolean(messageWindow?.hasOlder),
-        loadingMessages: sampleLoading,
-        loadOlderMessages: () => setMessageLimit(value => value + 100),
+        hasOlderMessages: mode === 'sample' ? Boolean(messageWindow?.hasOlder) : historyStatus.scope === scope.current && historyStatus.nextBefore !== null,
+        loadingMessages: sampleLoading || (mode === 'chatgpt' && historyStatus.scope === scope.current && historyStatus.loading),
+        loadOlderMessages: () => { void loadOlderMessages(); },
         allProposals,
         conversations,
         activeConversationId,
@@ -624,7 +668,7 @@ export function Coach({ syncLabel }: { syncLabel: string }) {
           if (scroll) olderScroll.current = { height: scroll.scrollHeight, top: scroll.scrollTop };
           following.current = false;
           loadOlderMessages();
-        }}>Load older sample messages</button>}
+        }}>{mode === 'sample' ? 'Load older sample messages' : 'Load earlier messages'}</button>}
         {(loadingMessages || mode === 'checking') && <p className="field-hint" role="status">Loading messages…</p>}
         {messages.map(message => {
           const proposal = allProposals.find(p => p.messageId === message.id);
