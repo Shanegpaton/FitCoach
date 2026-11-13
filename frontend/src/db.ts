@@ -57,7 +57,6 @@ export function activateUserDatabase(userId: string) {
   if (activeUserId !== userId) { db = new TrainingDB(`fitcoach-user-${userId}`, userId); activeUserId = userId; }
   return db;
 }
-export function getActiveUserId() { return activeUserId; }
 
 export async function enqueueChange(entity: string, entityId: string, operation: PendingChange['operation'], payload: unknown, database = db) {
   if (!database.ownerId) return;
@@ -186,7 +185,6 @@ export async function applyProposal(proposal: Proposal, database = db) {
       throw new Error('Your plan changed since this proposal. Ask for a fresh proposal before applying.');
     await savePlan({ ...proposal.plan, active: true }, database);
     await database.proposals.put({ ...proposal, status: 'applied' });
-    await enqueueChange('proposals', proposal.id, 'upsert', await database.proposals.get(proposal.id), database);
   });
 }
 
