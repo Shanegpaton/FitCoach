@@ -63,6 +63,22 @@ base64url value as the API project's `FITCOACH_CHATGPT_SECRET`. After the databa
 An older permanent `owner.json` is released automatically if it has no credentials. If it still has credentials, sign in as that FitCoach account and save them to the backend before other accounts use the VM. Ordinary leased sessions are also cleared on expiry or explicit disconnect; temporary VM credentials are not a durable backup.
 The training API and account sync remain separate.
 
+## Troubleshoot an immediately closed viewer
+
+If the viewer stays grey and reports “Browser connection closed”, ensure the
+deployed gateway selects the validated `fitcoach.<viewer token>` WebSocket
+subprotocol in its handshake response. Browsers reject a handshake that omits
+the selection when the client offered a protocol, even if the gateway accepted
+the connection internally. Never log the protocol value: it contains the
+short-lived viewer credential.
+
+After updating the root-owned checkout at `/opt/fitcoach-vm`, restart
+`fitcoach-vm-gateway.service` and start a fresh connection from Settings. This
+gateway-only fix does not require rebuilding the PWA. If the viewer still
+closes, confirm the PWA's exact origin is in `FITCOACH_VM_PWA_ORIGIN`, that
+`fitcoach-vnc.service` is running, and that it listens on loopback port 5901.
+`/health` alone does not verify the VNC relay or its WebSocket handshake.
+
 From the iPhone, control the **VM browser** and finish OpenAI consent. The protected OAuth process waits five minutes for a one-use `http://127.0.0.1:<port>/auth/callback` request. It then exchanges the code with the issued client ID and verifies the signed ID token through OpenAI’s JWKS. Tokens and the stable opaque host ID are held temporarily in the protected state directory until handoff cleanup, disconnect, or lease expiry. The browser receives the OpenAI page and callback response, never the token JSON. Do not capture the authorization URL, browser session, terminal output, or credential files in diagnostics. The VM serves accounts sequentially; it does not isolate simultaneous Firefox desktops.
 
 ```bash

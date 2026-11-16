@@ -128,6 +128,7 @@ def test_embedded_viewer_requires_attempt_token_and_app_origin(setup, monkeypatc
     monkeypatch.setattr(gateway.asyncio, 'open_connection', fake_open)
     with client.websocket_connect('/v1/viewer', headers={'origin': 'https://app.example'},
                                   subprotocols=[protocol]) as ws:
+        assert ws.accepted_subprotocol == protocol
         assert ws.receive_bytes() == b'RFB 003.008\n'
     process.done.set()
 
