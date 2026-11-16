@@ -19,8 +19,10 @@ test('demo stays local, survives reload, and resetting leaves account data intac
   await page.getByLabel('What are you working toward?').fill('Changed demo goal');
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
   await page.reload(); await expect(page.getByLabel('What are you working toward?')).toHaveValue('Changed demo goal');
+  await page.getByLabel('What are you working toward?').fill('Unsaved demo draft');
   page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: 'Reset demo', exact: true }).click();
+  await expect(page).toHaveURL(/\/\?demo=1$/);
   await expect(page.getByText(/Demo · synthetic data/)).toBeVisible();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page.getByLabel('What are you working toward?')).toHaveValue('Build strength consistently');

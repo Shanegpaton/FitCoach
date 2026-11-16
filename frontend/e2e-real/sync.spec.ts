@@ -17,10 +17,10 @@ async function authenticate(context: BrowserContext, id = user, token = 'test-a'
   }, { id, token });
 }
 async function synced(page: Page) {
-  await expect.poll(async () => {
-    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    return page.getByRole('link', { name: 'Synchronization: Synced', exact: true }).isVisible();
-  }).toBe(true);
+  // Trigger once. Triggering on every poll can keep restarting sync before
+  // the assertion observes idle, even though each request succeeds.
+  await page.evaluate(() => window.dispatchEvent(new Event('fitcoach:sync-now')));
+  await expect(page.getByRole('link', { name: 'Synchronization: Synced', exact: true })).toBeVisible();
 }
 
 test('offline workout survives reload, syncs to another device, and competing edits require resolution', async ({ page, context, browser, request }) => {

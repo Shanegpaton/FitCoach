@@ -24,6 +24,7 @@ export function App() {
   const auth = useAuth();
   const [readyForUser, setReadyForUser] = useState('');
   const [fatal, setFatal] = useState('');
+  const [resettingDemo, setResettingDemo] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
   const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null);
   const [legacyAvailable, setLegacyAvailable] = useState(false);
@@ -126,6 +127,18 @@ export function App() {
       setImportingLegacy(false);
     }
   };
+  const resetDemo = async () => {
+    if (!window.confirm('Reset all demo changes? Your account data is unaffected.')) return;
+    setResettingDemo(true);
+    try {
+      await db.delete();
+      sessionStorage.removeItem('fitcoach:fitcoach-demo-v1:profile-draft');
+      window.location.replace('/?demo=1');
+    } catch {
+      setFatal('Could not reset the demo. Reload to try again.'); setResettingDemo(false);
+    }
+  };
+  if (resettingDemo) return <div className="startup" role="status"><p>Resetting demo…</p></div>;
   if (auth.loading) return <div className="startup"><span className="brand-mark">f.</span><p>Checking your training space…</p></div>;
   if (!auth.userId) return <div className="auth-screen"><span className="brand-mark large">f.</span><h1>Sign in to FitCoach</h1><p>Sign in with Google to open your private training space. Once signed in on this device, your workouts stay available offline.</p>{!auth.configured && <div className="auth-config" role="status"><strong>Supabase setup needed</strong><span>Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in frontend/.env.local, then configure Google OAuth in Supabase.</span></div>}<button className="button primary google-signin" disabled={!auth.configured || !online} onClick={() => void auth.signIn()}><GoogleMark />Continue with Google</button><a className="button secondary" href="/?demo=1">Explore demo</a>{!online && <p className="field-hint">Connect to the internet to sign in for the first time.</p>}{auth.error && <p className="auth-error" role="alert">{auth.error}</p>}</div>;
   if (fatal) return <div className="startup"><h1>Storage is unavailable</h1><p>FitCoach needs browser storage to save workouts. Check storage permissions and available space, then retry.</p><details><summary>Details</summary>{fatal}</details><button className="button primary" onClick={() => window.location.reload()}>Retry</button></div>;
@@ -144,7 +157,7 @@ export function App() {
       <div className={`app-shell${isCoach ? ' coach-shell' : isActiveWorkout ? ' active-workout-shell' : ''}`}>
         <a className="skip-link" href="#main-content">Skip to content</a>
         <CoachMaintenance />
-        {isDemo() && <div className="connection-banner demo-banner" role="status"><span>Demo · synthetic data · saved only in this browser. Coach uses sample replies.</span><div><button onClick={async () => { if (window.confirm('Reset all demo changes? Your account data is unaffected.')) { await db.delete(); window.location.replace('/?demo=1'); } }}>Reset demo</button><button onClick={() => void auth.signOut()}>Exit demo</button></div></div>}
+        {isDemo() && <div className="connection-banner demo-banner" role="status"><span>Demo · synthetic data · saved only in this browser. Coach uses sample replies.</span><div><button onClick={() => void resetDemo()}>Reset demo</button><button onClick={() => void auth.signOut()}>Exit demo</button></div></div>}
         {!focused && <header className="app-header"><Link to="/" className="brand" aria-label="FitCoach home"><span className="brand-mark">f.</span><span>fitcoach<span className="brand-dot">.</span></span></Link>
           <div className="header-right"><Link className="local-badge" to="/settings" aria-label={`Synchronization: ${syncLabel}`}><span />{auth.offlineAccess ? 'Offline · saved here' : syncLabel}</Link><Link className="icon-button" to="/settings" aria-label="Settings"><SettingsIcon size={20} /></Link><button className="icon-button" aria-label="Sign out" title={auth.email ? `Sign out ${auth.email}` : 'Sign out'} onClick={() => void auth.signOut()}><LogOut size={18} /></button></div></header>}
         {toast && <Notification {...toast} onDismiss={() => setToast(null)} />}

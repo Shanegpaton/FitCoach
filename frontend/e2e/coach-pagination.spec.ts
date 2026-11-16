@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+// This suite mocks HTTP responses; service-worker/offline behavior is covered separately.
+test.use({ serviceWorkers: 'block' });
 const headers = { 'Access-Control-Allow-Origin': 'http://localhost:4173', 'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS' };
 test('live Coach loads earlier pages, retains them on refresh, and fences conversation switches', async ({ page, context }) => {
   await page.addInitScript(() => localStorage.setItem('sb-fitcoach-e2e-auth-token', JSON.stringify({
