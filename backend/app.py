@@ -20,6 +20,7 @@ from sqlalchemy.exc import DBAPIError, DataError, IntegrityError, TimeoutError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 if __package__:
+    from .diagnostics import register_diagnostics
     from .auth import AuthVerifier, identity
     from .config import Settings
     from .database import Database, lock_user_mutations, set_identity
@@ -38,6 +39,7 @@ if __package__:
         rename_conversation, delete_conversation, conversation_messages, begin_turn,
         finish_turn, fail_turn, read_turn, processing_turn)
 else:
+    from diagnostics import register_diagnostics
     from auth import AuthVerifier, identity
     from config import Settings
     from database import Database, lock_user_mutations, set_identity
@@ -141,9 +143,10 @@ def configure_app(app: FastAPI, settings: Settings | None = None) -> FastAPI:
     app.version = '1.0.0'
     app.state.settings = settings
     app.state.database = database
+    register_diagnostics(app)
     app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
         allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allow_headers=['Authorization', 'Content-Type', 'If-Match'],
-        expose_headers=['ETag'])
+        expose_headers=['ETag', 'X-Request-ID'])
 
     @app.exception_handler(IntegrityError)
     async def integrity_error(request, exc):

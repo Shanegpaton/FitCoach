@@ -710,3 +710,9 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 
 .coach-model-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
 .coach-model-actions .text-button { padding: 12px 16px; }
+
+/* Keep portfolio controls reachable on phones without squeezing the explanation. */
+.demo-banner { flex-wrap: wrap; justify-content: space-between; }
+.demo-banner > span { flex: 1 1 240px; }
+.demo-banner > div { display: flex; gap: 8px; }
+.demo-banner button { min-height: 44px; padding: 8px 12px; white-space: nowrap; }

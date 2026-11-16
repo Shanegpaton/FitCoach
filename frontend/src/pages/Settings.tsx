@@ -1,3 +1,4 @@
+import { exportDiagnostics } from '../diagnostics';
 import { TrainingFields } from '../TrainingFields';
 import { useState, type FormEvent } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -103,6 +104,7 @@ export function Settings() {
     }} /></label></div><button className="text-button" onClick={() => run(async () => {
       const persistent = await navigator.storage?.persist?.(); notify(persistent ? 'Persistent storage enabled.' : 'Your browser manages storage. Keep regular exported backups.');
     })}>Request persistent storage</button></section>
+    <section className="settings-card"><SectionTitle title="Troubleshooting" /><button className="button secondary" onClick={exportDiagnostics}>Export error diagnostics</button><p className="field-hint">Contains error codes, times, status codes and request references. No workout or conversation text.</p></section>
     <ChatGPTConnection />
     <CoachMemorySettings />
     <section id="install-app" className="settings-card"><SectionTitle title="Install FitCoach"><Smartphone size={20} /></SectionTitle><p>Install FitCoach on your home screen after opening it once online. Your plans, logs, timers, and history work offline.</p><div className="install-steps"><div><p><strong>iPhone / iPad</strong>Open in Safari, tap Share, then Add to Home Screen.</p></div><div><p><strong>Android</strong>Open in Chrome, then choose Install app or Add to Home screen in the browser menu.</p></div></div><p className="field-hint">Installation requires HTTPS on phones. ChatGPT Coach requires an online connection and granted plan usage.</p></section>

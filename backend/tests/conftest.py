@@ -14,6 +14,7 @@ from backend.app import create_app
 from backend.auth import AuthVerifier
 from backend.config import Settings
 from backend.setup_checkpointer import main as setup_checkpointer
+from backend.testing.database import clear_training_data
 
 
 @pytest.fixture(scope='session')
@@ -21,6 +22,8 @@ def migrated_database():
     admin = os.getenv('FITCOACH_TEST_ADMIN_URL')
     runtime = os.getenv('FITCOACH_TEST_DATABASE_URL')
     if not admin or not runtime:
+        if os.getenv('FITCOACH_REQUIRE_DATABASE_TESTS') == '1':
+            pytest.fail('CI requires disposable PostgreSQL test URLs; integration tests must not skip')
         pytest.skip('Set FITCOACH_TEST_ADMIN_URL and FITCOACH_TEST_DATABASE_URL for real PostgreSQL tests')
     if os.getenv('FITCOACH_TEST_ALLOW_RESET') != 'YES':
         pytest.fail('These tests downgrade the application schema: FITCOACH_TEST_ALLOW_RESET=YES is required')
@@ -33,6 +36,7 @@ def migrated_database():
     engine = sa.create_engine(admin)
     with engine.connect() as connection:
         assert connection.scalar(sa.text('SELECT count(*) FROM fitcoach.exercise_catalog')) == 12
+    clear_training_data(admin)
     command.downgrade(config, 'base')
     with engine.connect() as connection:
         assert connection.scalar(sa.text("SELECT to_regnamespace('fitcoach')")) is None

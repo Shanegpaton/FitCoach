@@ -1,3 +1,4 @@
+import { DEMO_USER, isDemo } from './demo';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
 
@@ -5,7 +6,7 @@ const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 const cachedUserKey = `fitcoach:${url ?? 'unconfigured'}:last-user`;
 
-export const supabase: SupabaseClient | null = url && anonKey
+export const supabase: SupabaseClient | null = url && anonKey && !isDemo()
   ? createClient(url, anonKey, {
       auth: { flowType: 'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
     })
@@ -27,6 +28,14 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  if (isDemo()) return <AuthContext.Provider value={{ configured: false, loading: false, userId: DEMO_USER,
+    email: null, session: null, offlineAccess: false, error: '', signIn: async () => {}, refresh: async () => {},
+    signOut: async () => { sessionStorage.removeItem('fitcoach:demo'); window.location.replace('/'); },
+  }}>{children}</AuthContext.Provider>;
+  return <AccountAuthProvider>{children}</AccountAuthProvider>;
+}
+
+function AccountAuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
@@ -123,7 +132,7 @@ export function useAuth() {
 }
 
 export async function getSyncAccessToken(forceRefresh = false, expectedUserId?: string): Promise<string | null> {
-  if (!supabase) return null;
+  if (isDemo() || !supabase) return null;
   if (forceRefresh) {
     const { data, error } = await supabase.auth.refreshSession();
     if (error) return null;
