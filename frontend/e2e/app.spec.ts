@@ -1272,7 +1272,7 @@ test('workout choice starts Upper offline out of rotation and offers another ses
   await page.getByRole('button', { name: 'Finish workout', exact: true }).click();
   await page.getByRole('button', { name: 'Save completed workout', exact: true }).click();
   expect(await readPlans(page)).toBe(before);
-  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Today', exact: true }).click();
   await page.getByRole('button', { name: 'Start another session', exact: true }).click();
   await page.getByRole('button', { name: 'Start Pull from My strength plan', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Pull', exact: true })).toBeVisible();

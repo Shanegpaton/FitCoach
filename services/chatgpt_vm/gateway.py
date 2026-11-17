@@ -320,7 +320,9 @@ def create_app(gateway: Gateway) -> FastAPI:
         except OSError:
             await websocket.close(code=1011)
             return
-        await websocket.accept()
+        # Browsers reject the handshake when an offered subprotocol is not
+        # selected. Echo only the attempt protocol that passed validation above.
+        await websocket.accept(subprotocol=f'fitcoach.{token}')
 
         async def to_browser():
             while data := await reader.read(65536):
