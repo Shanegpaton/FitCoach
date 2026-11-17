@@ -16,3 +16,8 @@ frontend/*.tsbuildinfo
 frontend/.certs/
 frontend/.env.local
 frontend/.env.*.local
+frontend/dist-integration/
+frontend/benchmark-results/
+evaluations/results/
+frontend/test-results-real/
+frontend/test-results-benchmark/

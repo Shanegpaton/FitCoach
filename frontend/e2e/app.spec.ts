@@ -864,7 +864,7 @@ test.describe('Coach active workout tools', () => {
         if (operation === 'edit') expect(stored?.blocks[0].sets[0]).toEqual(original.blocks[0].sets[0]);
         await card.getByRole('link', { name: 'Open workout' }).click();
         await expect(page).toHaveURL(/\/workout\/current-workout$/);
-        await expect(page.getByRole('heading', { name: 'Current squat workout', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Current squat workout', level: 1, exact: true })).toBeVisible();
       }
     });
   }

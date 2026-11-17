@@ -23,3 +23,13 @@ Dexie version 4 adds indexes without rewriting training records or changing sync
 `src/planProposalDecision.ts` binds each plan approval, rejection, and status-recovery write to its originating database and verified account ID. The cache helper requires an explicit database and preserves newer/equal server versions, cloud tombstones, changed source versions, and pending local edits. UI results remain scoped to the originating account and conversation.
 
 Backup validation distinguishes local sample proposals from server-backed display caches. Sample proposals require their local message and exercise references. Server-backed caches retain their validated plan snapshots without those local references, because live transcripts remain server-side and old exercise definitions can disappear. Import validates before replacement and retains all previous cache snapshots in the transactional recovery copy.
+
+
+## Portfolio verification
+
+- `npm run test:real-api` starts a real loopback API and a separate integration build on port 4175. It requires an acknowledged disposable PostgreSQL database; see the root portfolio guide. Identity verification is stubbed; API, migrations, SQL, IndexedDB and synchronization are real. The HTTP integration build is separate from production HTTPS validation.
+- `npm run benchmark` records warm query/save p50/p95 measurements at 100, 1,000 and 5,000 sessions in `benchmark-results/history.json`. It uses real Chromium IndexedDB, excludes rendering/network/fixture setup, and cleans up its isolated database. `FITCOACH_BENCHMARK_CPU_RATE=4` enables a controlled CPU comparison.
+- `/?demo=1` selects a tab-scoped demo with a separate ownerless database and synthetic records. No online session is provided; writes do not enqueue account synchronization. Reset and exit controls are always visible. Existing account sessions/databases are retained.
+- Settings can export the latest 30 metadata-only diagnostic events. The browser attempts at most 10 authenticated reports per page load without delaying local operations. Messages, stacks, URLs, tokens and training/chat contents are excluded.
+
+See [the interview guide](../docs/portfolio-guide.md) for architectural decisions, commands and honest limits on these checks.

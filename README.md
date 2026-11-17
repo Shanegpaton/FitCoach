@@ -2,6 +2,14 @@
 
 FitCoachGPT is a phone-first workout planner and tracker. Build a routine, log your sets, and see your progress in a dark, installable Progressive Web App (PWA).
 
+## Try it and understand the engineering
+
+Choose **Explore demo** on the sign-in screen, or open `/?demo=1`, for a seeded local-only training space with 24 synthetic workouts. Demo data has a separate database, can be reset without affecting account records, and uses explicitly labeled sample Coach replies. Exit demo to return to normal sign-in.
+
+[Portfolio and interview guide](docs/portfolio-guide.md) explains the architecture, verification layers, tradeoffs, commands, and demonstration script. Push/PR verification is defined in [the CI workflow](.github/workflows/verify.yml). It includes a real PostgreSQL suite, a browser/API synchronization workflow, and downloadable benchmark reports. These are verification jobs; deployment remains manual.
+
+Settings offers **Export error diagnostics**. Reports contain bounded error categories, timestamps, status codes and request references, never workout/chat text. Signed-in browsers also send bounded best-effort metadata to the authenticated API log sink.
+
 ## ChatGPT VM connection
 
 Settings contains the [ChatGPT VM connection](services/chatgpt_vm/README.md). The authenticated API starts a five-minute exclusive VM session for a FitCoach account; no operator pairing code is needed. The PWA controls the protected VM browser and shows the verified ChatGPT account and whether plan usage was granted. After sign-in, the API retrieves a one-use handoff, stores encrypted credentials in the account-scoped Supabase PostgreSQL backend, and asks the VM to delete its temporary credentials and Firefox profile. The PWA receives only connection status and a short-lived viewer token. With granted plan usage, Coach sends online requests through the authenticated API; the API refreshes tokens and calls the Responses API. Offline or disconnected Coach uses labeled sample responses. OpenAI eligibility for FitCoachGPT-operated VMs needs confirmation before broader release.

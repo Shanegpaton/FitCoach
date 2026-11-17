@@ -1,3 +1,4 @@
+import { recordDiagnostic } from './diagnostics';
 import type { SyncEntity } from './db';
 import { db, enqueueChange, saveRecovery, syncRootId, syncStateId, type PendingChange, type TrainingDB } from './db';
 import { catalog } from './catalog';
@@ -51,9 +52,12 @@ async function authenticatedFetch(path: string, init: RequestInit, tokenProvider
   if (!apiUrl) throw new Error('Synchronization API is not configured. Local training remains available.');
   let token = await tokenProvider(false, userId);
   if (!token) throw new Error('Sign in online to synchronize. Your local changes are safe.');
-  const send = (accessToken: string) => fetch(`${apiUrl}${path}`, {
+  const send = async (accessToken: string) => { const response = await fetch(`${apiUrl}${path}`, {
     ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${accessToken}` },
   });
+    if (!response.ok && response.status !== 401) recordDiagnostic('sync_error', { status: response.status, requestId: response.headers.get('X-Request-ID') });
+    return response;
+  };
   let response = await send(token);
   if (response.status === 401) {
     token = await tokenProvider(true, userId);
