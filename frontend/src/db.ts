@@ -1,4 +1,3 @@
-import { DEMO_USER } from './demo';
 import Dexie, { type Table } from 'dexie';
 import { backupSchema, defaultProfile, planSchema, sessionSchema } from './domain';
 import type { Backup, Exercise, Message, Plan, Profile, Proposal, ScheduleOverride, Session } from './domain';
@@ -55,7 +54,7 @@ export let db = legacyDb;
 let activeUserId: string | null = null;
 export function activateUserDatabase(userId: string) {
   if (!userId) throw new Error('An authenticated user is required to open training data.');
-  if (activeUserId !== userId) { db = userId === DEMO_USER ? new TrainingDB('fitcoach-demo-v1', null) : new TrainingDB(`fitcoach-user-${userId}`, userId); activeUserId = userId; }
+  if (activeUserId !== userId) { db = new TrainingDB(`fitcoach-user-${userId}`, userId); activeUserId = userId; }
   return db;
 }
 

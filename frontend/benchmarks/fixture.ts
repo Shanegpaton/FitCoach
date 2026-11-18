@@ -1,13 +1,5 @@
-import { catalog, starterPlan } from './catalog';
-import { backupSchema, defaultProfile, localDate, type Backup, type Session } from './domain';
-import type { TrainingDB } from './db';
-
-export const DEMO_USER = 'portfolio-demo';
-export function isDemo() {
-  if (typeof window === 'undefined') return false;
-  if (new URLSearchParams(window.location.search).get('demo') === '1') sessionStorage.setItem('fitcoach:demo', 'yes');
-  return sessionStorage.getItem('fitcoach:demo') === 'yes';
-}
+import { catalog, starterPlan } from '../src/catalog';
+import { backupSchema, defaultProfile, localDate, type Backup, type Session } from '../src/domain';
 
 /** Synthetic data only. Dates move with today; IDs remain deterministic. */
 export function demoBackup(count = 24): Backup {
@@ -39,12 +31,3 @@ export function demoBackup(count = 24): Backup {
     plans: [plan], sessions, overrides: [], messages: [], proposals: [] });
 }
 
-export async function seedDemo(database: TrainingDB) {
-  if (database.name !== 'fitcoach-demo-v1' || database.ownerId !== null) throw new Error('Demo seed requires the isolated demo database');
-  await database.transaction('rw', [database.profile, database.plans, database.sessions, database.sync], async () => {
-    if (await database.sync.get('demo-seeded')) return;
-    const data = demoBackup();
-    await database.profile.put(data.profile); await database.plans.bulkPut(data.plans); await database.sessions.bulkPut(data.sessions);
-    await database.sync.put({ id: 'demo-seeded', userId: DEMO_USER, kind: 'state' });
-  });
-}

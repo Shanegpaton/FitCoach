@@ -4,11 +4,9 @@ FitCoachGPT is a phone-first workout planner and tracker. Build a routine, log y
 
 ## Try it and understand the engineering
 
-Choose **Explore demo** on the sign-in screen, or open `/?demo=1`, for a seeded local-only training space with 24 synthetic workouts. Demo data has a separate database, can be reset without affecting account records, and uses explicitly labeled sample Coach replies. Exit demo to return to normal sign-in.
 
 [Portfolio and interview guide](docs/portfolio-guide.md) explains the architecture, verification layers, tradeoffs, commands, and demonstration script. Push/PR verification is defined in [the CI workflow](.github/workflows/verify.yml). It includes a real PostgreSQL suite, a browser/API synchronization workflow, and downloadable benchmark reports. These are verification jobs; deployment remains manual.
 
-Settings offers **Export error diagnostics**. Reports contain bounded error categories, timestamps, status codes and request references, never workout/chat text. Signed-in browsers also send bounded best-effort metadata to the authenticated API log sink.
 
 ## ChatGPT VM connection
 

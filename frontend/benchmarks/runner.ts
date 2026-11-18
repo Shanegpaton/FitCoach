@@ -1,5 +1,5 @@
 import { TrainingDB, putLocalChange } from '../src/db';
-import { demoBackup } from '../src/demo';
+import { demoBackup } from './fixture';
 import { completedInRange, readHistorySummary, readJournalPage } from '../src/historyQueries';
 import { localDate } from '../src/domain';
 

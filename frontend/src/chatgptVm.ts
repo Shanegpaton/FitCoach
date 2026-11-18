@@ -1,4 +1,3 @@
-import { recordDiagnostic } from './diagnostics';
 import { getSyncAccessToken } from './auth';
 import type { ChatAdapter } from './coach';
 import { db, syncStateId } from './db';
@@ -57,7 +56,6 @@ export async function backendRequest<T>(userId: string, path: string, init: Requ
         let response = await send(false);
         if (response.status === 401) response = await send(true);
         if (!response.ok) {
-          recordDiagnostic('api_error', { status: response.status, requestId: response.headers.get('X-Request-ID') });
           const body: unknown = await response.json().catch(() => ({}));
           throw new BackendError(errorMessage(body, `ChatGPT storage request failed (${response.status}).`), response.status, response.headers.get('X-Request-ID'));
         }
