@@ -123,9 +123,9 @@ In Coach, Enter sends a message and Shift+Enter inserts a new line. Footnote lin
 
 Coach opens as a focused chat view with one compact toolbar and no global header or bottom tabs. Back to Today restores the main navigation. The toolbar keeps the conversation title, searchable **Chats**, New chat, and sync/settings access; the model selector provides explicit model selection. Rename and delete use in-app dialogs. An active workout has a compact Resume link above the composer, which grows with longer drafts.
 
-The PWA calls the FastAPI backend for synchronization and connected Coach. It does not call Ollama or use the separate Python RAG pipeline and scientific corpus described below.
+The PWA calls the FastAPI backend for synchronization and connected Coach.
 
-The authenticated Coach API runs each live reply through a bounded LangGraph model/tool loop in `backend/agent/`. FastAPI validates the request with Pydantic. Read-only tools in `backend/agent/tools/` can search account-scoped workout history across dates and recorded exercise names, inspect full session snapshots, and read profile, plans, and exercises. Typed proposal tools create reviewable plan and workout previews; only explicit user approval writes those changes. The PWA enables those tools after account data has synchronized; while sync is pending, live Coach can still answer general questions. A request such as “How was my bench press one year ago?” searches a window around that date and uses actual logged sets. The PWA's sample mode and independent Python RAG backend are unchanged.
+The authenticated Coach API runs each live reply through a bounded LangGraph model/tool loop in `backend/agent/`. FastAPI validates the request with Pydantic. Read-only tools in `backend/agent/tools/` can search account-scoped workout history across dates and recorded exercise names, inspect full session snapshots, and read profile, plans, and exercises. Typed proposal tools create reviewable plan and workout previews; only explicit user approval writes those changes. The PWA enables those tools after account data has synchronized; while sync is pending, live Coach can still answer general questions. A request such as “How was my bench press one year ago?” searches a window around that date and uses actual logged sets.
 
 Live messages use a 90-second processing lease renewed every 20 seconds, with a four-minute execution limit. Interrupted requests keep their message and request ID; Coach checks status after reload, reconnect, and while visible, then loads a completed reply or allows retry after failure/lease expiry. Replies and proposal inserts verify the current attempt, and checkpoints are isolated per attempt so an expired worker cannot overwrite a retry. Apply Alembic migration `0007` before deploying this API version; it releases legacy started turns while preserving their messages. Drain old API workers before migration because they do not perform attempt ownership checks.
 
@@ -186,7 +186,7 @@ Apply Alembic migration `0011` before deploying the updated API for training pre
 
 The independent `backend/` application uses FastAPI, SQLAlchemy 2, Psycopg 3 and Alembic with Supabase PostgreSQL. It verifies Supabase Auth bearer tokens and provides profiles, owned exercises, a shared exercise catalog, nested plans and session snapshots, and schedule overrides. A private schema, forced row-level security, ownership foreign keys, transactional writes, soft deletion and ETag preconditions protect account data and workout history.
 
-Install its dependencies separately from the RAG requirements:
+Install the API development dependencies:
 
 ```bash
 pip install -r backend/requirements-dev.txt
@@ -196,124 +196,7 @@ Follow [the API setup and verification guide](backend/README.md) to provision a 
 
 Backend deployment requires a manual migration and checkpoint-setup step before deploying the API. There is no checked-in GitHub Actions deployment workflow. See the [backend deployment guide](backend/README.md#migration-and-deployment-order) for the sequence and credentials.
 
-The API starts without loading embeddings or Ollama. The API can deploy as a Vercel Python Function with `backend/` as its project root; see [the Vercel deployment steps](backend/README.md#deploy-the-api-on-vercel). Live ChatGPT Coach replies are available to connected accounts through a bounded LangGraph model/tool loop; conversation records and checkpoints are persisted per account, and live Coach plan proposals are persisted for approval across requests. Backend availability does not gate local workout entry. Multiple active sessions are allowed in the cloud so simultaneous offline workouts from different devices cannot reject one another's recorded sets.
-
-## Python RAG Backend
-
-The independent Python backend answers fitness questions using scientific papers about training, nutrition, supplements, and recovery. It provides a command-line interface and a reusable service using local Ollama models. Its Retrieval-Augmented Generation (RAG) pipeline keeps chunks, embeddings, and retrieval indexes in memory.
-
-## Pipeline
-
-```text
-PDF papers
-  -> page-by-page text extraction
-  -> sentence-aware chunks
-  -> dense embeddings + BM25 index
-  -> hybrid retrieval with Reciprocal Rank Fusion
-  -> retrieved context added to the prompt
-  -> grounded Ollama answer with citations
-```
-
-## Features
-
-- Loads 10 PDF papers with `pypdf`
-- Preserves source URLs and PDF page numbers
-- Creates sentence-aware chunks targeting 300 MPNet tokens
-- Uses approximately 25 tokens of overlap
-- Embeds chunks with `sentence-transformers/all-mpnet-base-v2`
-- Stores normalized 768-dimensional vectors in memory
-- Supports dense, BM25, and hybrid retrieval
-- Combines dense and BM25 rankings with Reciprocal Rank Fusion
-- Generates cited answers with local `llama3.2` through Ollama
-- Abstains when the retrieved evidence does not support an answer
-- Includes optional retrieval and answer-quality evaluation
-
-## Runtime Prerequisites
-
-- Python 3.10 or newer
-- [Ollama](https://ollama.com/)
-- The `llama3.2` Ollama model
-
-## Setup
-
-Create and activate a virtual environment:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Download and start the Ollama model:
-
-```bash
-ollama pull llama3.2
-ollama serve
-```
-
-The embedding model is downloaded automatically the first time the application runs.
-
-## Ask a Question
-
-Hybrid retrieval is the default:
-
-```bash
-python fit_coach_gpt.py \
-  --query "Does creatine improve high-intensity exercise performance?"
-```
-
-Choose a retrieval strategy or change the number of returned chunks:
-
-```bash
-python fit_coach_gpt.py \
-  --retrieval bm25 \
-  --top-k 5 \
-  --query "How much protein should an exercising person consume?"
-```
-
-Valid retrieval modes are `dense`, `bm25`, and `hybrid`.
-
-## Corpus and Chunking
-
-PDFs are stored in `data/documents/`. Source metadata is stored in `data/manifest.csv` and matched by exact PDF filename.
-
-Each PDF is extracted page by page. The chunker uses the MPNet tokenizer to create chunks of up to 300 model tokens with approximately 25 tokens of sentence-level overlap. Each chunk retains its document ID, title, source URL, year, topics, and page range.
-
-Chunk count depends on the corpus, tokenizer, and chunking options. The CLI reports the actual count and normalized `float32` embedding matrix dimensions and memory usage at runtime; each embedding has 768 dimensions.
-
-## Retrieval
-
-Dense retrieval embeds the question with MPNet and computes cosine similarity using a dot product against the normalized chunk embeddings.
-
-BM25 retrieval performs keyword-based sparse search. Hybrid retrieval obtains candidates from both methods and combines their ranks using Reciprocal Rank Fusion:
-
-```text
-RRF score = sum(1 / (60 + rank))
-```
-
-This combination helps with both semantic questions and exact fitness terminology.
-
-## Grounded Generation
-
-Retrieved chunks (five by default, configurable with `--top-k`) are labeled `[S1]`, `[S2]`, and so on and injected into the Ollama prompt. The model is instructed to answer only from this evidence and cite supported claims.
-
-Answers without a valid retrieved-source citation are replaced with:
-
-```text
-I do not have enough evidence in the provided sources.
-```
-
-FitCoachGPT provides educational fitness information and is not a medical diagnosis or treatment system.
-
-## Optional Evaluation
-
-The backend includes an optional evaluation command using the labeled questions in `data/eval_dataset.json`:
-
-```bash
-python fit_coach_gpt.py --evaluate --top-k 5
-```
-
-It reports retrieval and answer-quality scores, using Ollama to judge answers, and saves detailed results to `data/evaluation_results.json`.
+The API can deploy as a Vercel Python Function with `backend/` as its project root; see [the Vercel deployment steps](backend/README.md#deploy-the-api-on-vercel). Live ChatGPT Coach replies are available to connected accounts through a bounded LangGraph model/tool loop; conversation records and checkpoints are persisted per account, and live Coach plan proposals are persisted for approval across requests. Backend availability does not gate local workout entry. Multiple active sessions are allowed in the cloud so simultaneous offline workouts from different devices cannot reject one another's recorded sets.
 
 ## Project Structure
 
@@ -339,31 +222,6 @@ backend/                     Independent FastAPI relational training API
   store.py                   Transactional aggregate writes and document assembly
   migrations/                Alembic schema, RLS, metadata triggers and catalog seed
   tests/                     Unit and restricted-role PostgreSQL integration tests
-fit_coach_gpt.py             Backward-compatible CLI entry point
-fitcoach/
-  cli.py                     Command-line argument handling
-  config.py                  Paths and model defaults
-  models.py                  Shared document and retrieval data models
-  ingestion.py               PDF loading and sentence-aware chunking
-  retrieval.py               Dense, BM25, and hybrid retrieval
-  generation.py              Grounded prompting and Ollama generation
-  evaluation.py              Retrieval and generation evaluation
-  reporting.py               Human-readable CLI output
-  service.py                 Reusable standalone RAG service
-requirements.txt             Independent Python RAG dependencies
-data/documents/              PDF corpus
-data/manifest.csv            Source metadata
-data/eval_dataset.json       Evaluation questions and relevance labels
-data/evaluation_results.json Detailed evaluation output
-```
-
-The existing CLI commands are unchanged. Application code can initialize the
-pipeline once and reuse it across requests:
-
-```python
-from fitcoach import FitCoachService
-
-coach = FitCoachService().initialize()
-result = coach.answer("How much protein should I eat?")
-print(result.text)
+evaluations/                 Coach evaluation scenarios and runner
+services/chatgpt_vm/         ChatGPT connection service
 ```

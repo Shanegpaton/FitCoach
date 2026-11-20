@@ -1,6 +1,6 @@
 # FitCoachGPT
 
-FitCoachGPT is an independent fitness training planner and workout tracker. Its main user experience is a phone-first Progressive Web App (PWA) in `frontend/`. The FastAPI/PostgreSQL API provides account-scoped synchronization. The existing Python RAG backend is a separate capability; preserve it while working on the PWA or sync API.
+FitCoachGPT is an independent fitness training planner and workout tracker. Its main user experience is a phone-first Progressive Web App (PWA) in `frontend/`. The FastAPI/PostgreSQL API provides account-scoped synchronization.
 
 ## Product behavior
 
@@ -24,7 +24,7 @@ FitCoachGPT is an independent fitness training planner and workout tracker. Its 
 
 ## Backend, database, and deployment
 
-- The API lives in `backend/` and uses FastAPI, SQLAlchemy 2.0, Psycopg 3, and Alembic with Supabase-hosted PostgreSQL. Read `backend/README.md` before changing API setup, migrations, Coach persistence, or deployment. Keep API startup independent of RAG, embeddings, and Ollama.
+- The API lives in `backend/` and uses FastAPI, SQLAlchemy 2.0, Psycopg 3, and Alembic with Supabase-hosted PostgreSQL. Read `backend/README.md` before changing API setup, migrations, Coach persistence, or deployment.
 - ChatGPT connection uses `services/chatgpt_vm/` for exclusive browser sign-in and a server-to-server credential handoff. Read its `README.md` before changing that flow. Keep OpenAI credentials encrypted in the backend, with only connection metadata and short-lived viewer tokens exposed to the PWA. Preserve cleanup after confirmed storage.
 - Alembic is the sole application schema migration system. Use migration credentials for schema changes and a separate restricted runtime role for the API. Preserve the private application schema and row-level security protections. Never put database credentials, Supabase service-role keys, or other secrets in frontend code or committed files.
 - The API verifies Supabase access tokens and derives ownership from the verified identity. Do not trust an account/user ID supplied in a request body. Keep authenticated database access scoped to the verified account and fail closed when identity context is missing.
