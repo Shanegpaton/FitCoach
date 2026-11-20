@@ -2,11 +2,28 @@
 
 FitCoachGPT is a phone-first workout planner and tracker. Build a routine, log your sets, and see your progress in a dark, installable Progressive Web App (PWA).
 
-## Try it and understand the engineering
+## At a glance
 
+- **Plan and log:** Create routines, record sets, and review workout history on a phone-friendly PWA.
+- **Keep training offline:** Workouts save to an account-scoped IndexedDB database first; an outbox synchronizes changes when the API is reachable.
+- **Resolve conflicts:** Server versions detect competing edits, with recovery copies and explicit choices for resolving them.
+- **Review Coach changes:** Connected Coach can read synchronized training data and propose changes. The user reviews and approves proposals before records change. Disconnected Coach provides labeled sample replies.
 
-[Portfolio and interview guide](docs/portfolio-guide.md) explains the architecture, verification layers, tradeoffs, commands, and demonstration script. Push/PR verification is defined in [the CI workflow](.github/workflows/verify.yml). It includes a real PostgreSQL suite, a browser/API synchronization workflow, and downloadable benchmark reports. These are verification jobs; deployment remains manual.
+The frontend uses React, TypeScript, Dexie and Vite. The API uses FastAPI, PostgreSQL and SQLAlchemy, with Supabase authentication and a bounded LangGraph Coach agent.
 
+```mermaid
+flowchart LR
+  UI[React PWA] -->|Save immediately| Local[Account IndexedDB]
+  Local -->|Outbox and version checks| API[FastAPI]
+  API -->|Account-scoped access| DB[PostgreSQL]
+  API --> Agent[Coach agent]
+  Agent -->|Proposal| Review[User review and approval]
+  Review --> API
+```
+
+[Run the PWA](#run-the-pwa) · [Architecture and interview guide](docs/portfolio-guide.md) · [Backend setup and deployment](backend/README.md)
+
+The [verification workflow](.github/workflows/verify.yml) includes frontend and browser checks, PostgreSQL integration tests, a browser/API synchronization workflow, and benchmark reports. Deployment remains manual. See the portfolio guide for what these checks do and do not establish.
 
 ## ChatGPT VM connection
 

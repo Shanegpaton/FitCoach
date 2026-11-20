@@ -90,7 +90,7 @@ Set the frontend Vercel project's `VITE_FITCOACH_API_URL` to the API deployment'
 
 ### Migration and deployment order
 
-There is no checked-in GitHub Actions workflow or deploy-hook automation. From a trusted environment with the migration URL and `FITCOACH_RUNTIME_ROLE` configured, run:
+The checked-in GitHub Actions workflow runs verification; it does not deploy the API or trigger deployment automation. From a trusted environment with the migration URL and `FITCOACH_RUNTIME_ROLE` configured, run:
 
 ```bash
 alembic -c backend/alembic.ini upgrade head
@@ -230,4 +230,4 @@ The push/PR workflow in `.github/workflows/verify.yml` provisions PostgreSQL 16 
 
 `python -m backend.testing.server` is a loopback-only browser integration harness, not a deployment entrypoint. It requires the reset acknowledgment and loopback URLs for `fitcoach_test`, resets training fixtures, and replaces only external identity verification. Production API/SQL behavior remains real. The portfolio guide documents `npm run test:real-api` and live Coach evaluations.
 
-Each API response includes a server-generated `X-Request-ID`, exposed through CORS. Request logs contain the reference, method, route template, response status and duration; unhandled errors return a generic 500 without exception text. Configure the `fitcoach.diagnostics` logger at INFO with your host's log handler for request timing visibility. `POST /v1/diagnostics` accepts authenticated allowlisted browser error metadata and rejects arbitrary text fields. It logs error categories without account IDs, exception text or request bodies. This complements hosting logs; it does not provide alerting, log retention management or streaming-response recovery.
+Each API response includes a server-generated `X-Request-ID`, exposed through CORS. Request logs contain the reference, method, route template, response status and duration; unhandled errors return a generic 500 without exception text. Configure the `fitcoach.diagnostics` logger at INFO with your host's log handler for request timing visibility. `POST /v1/diagnostics` accepts authenticated allowlisted browser error metadata and rejects arbitrary text fields. It logs error categories without account IDs, exception text or request bodies. The current frontend does not automatically submit these reports or provide a diagnostic export. This endpoint complements hosting logs; it does not provide alerting, log retention management or streaming-response recovery.

@@ -13,8 +13,7 @@ Use “I built” only for work you can explain and take responsibility for. If 
 | Automatic verification | `.github/workflows/verify.yml` | Frontend tests/build/browser workflows, actual PostgreSQL tests, real API browser workflow, evaluator checks, and benchmark report run on pushes/PRs. |
 | Database test enforcement | `backend/tests/conftest.py` | CI fails when database configuration is missing instead of reporting a misleading green suite with skipped integration tests. |
 | Real API workflow | `frontend/e2e-real/sync.spec.ts`, `backend/testing/server.py` | Offline recording survives reload, syncs to another browser, isolates accounts and surfaces competing profile edits through the real API/SQL layer. External identity alone is stubbed. |
-| Error diagnostics | `backend/diagnostics.py`, `frontend/src/diagnostics.ts` | Requests receive server-generated correlation IDs; browser failures report a strictly limited metadata schema. Recent diagnostic metadata can be exported from Settings. |
-| Portfolio demo | `frontend/src/demo.ts`, `auth.tsx`, `db.ts` | Visitors can explore a seeded local-only database without authenticating or consuming AI usage. Reset affects demo data only. |
+| API diagnostics | `backend/diagnostics.py` | API requests receive server-generated correlation IDs and structured request logs. |
 | Coach evaluations | `evaluations/coach.py`, `scenarios.json` | Sixteen synthetic scenarios can exercise the production inference, bounded agent graph, and actual SQL tools. Objective checks and human review are separate. |
 | Performance measurements | `frontend/benchmarks/` | Chromium measures actual IndexedDB queries and transactional saves at 100, 1,000 and 5,000 sessions. Reports retain raw samples and environment metadata. |
 
@@ -39,7 +38,7 @@ The local write and its pending synchronization record must stay consistent. A s
 
 AI does not get an unrestricted database connection or approval tool. It can request bounded reads and construct proposal previews. The server validates the preview; approval and freshness checks are application responsibilities.
 
-## Talking through the six additions
+## Talking through the engineering
 
 ### 1. Why several kinds of tests?
 
@@ -55,19 +54,11 @@ The existing mocked browser suite remains useful: external failures and unusual 
 
 An important distinction: “retry safe” does not mean “automatically merge everything.” Combining recorded sets from competing workouts could change the meaning of the user's history.
 
-### 3. How can you debug failures without collecting private data?
+### 3. How can you investigate API failures?
 
-> The API generates a request reference and logs time to response headers, response status and a route template. The browser records error categories and the corresponding reference. I deliberately excluded exception messages, stacks, request bodies, tokens and conversation text from the diagnostic payload.
+The API generates a request reference and logs the method, route template, response status and duration. Unhandled errors return a generic response. The API also accepts authenticated, allowlisted diagnostic metadata, but the current frontend does not automatically submit browser diagnostics or provide a diagnostic export. Hosting logs, retention and streaming-response recovery have their own limits.
 
-The browser retains at most 30 events and attempts at most 10 reports per page load, asynchronously. Storage failures or reporting failures must not interrupt workout entry. Authenticated reports go to the API log sink; this is not a full monitoring service with alerting or a dashboard. A hosting provider may separately capture access logs, so its retention/redaction settings still matter. Streaming failures after headers are sent need their existing application error/recovery behavior; HTTP middleware cannot replace an already-started response.
-
-### 4. Why a separate demo database?
-
-> A portfolio visitor should be able to try the product immediately. The demo uses synthetic workouts in a dedicated database with no account owner or online session. That keeps synchronization and live Coach disabled and gives Reset a safe, narrow scope.
-
-Visit `/?demo=1` or choose **Explore demo** on the sign-in screen. Demo selection is stored per browser tab, survives navigation/reloads, and can be exited. It does not clear a previously saved account session. It uses the existing sample Coach, which is explicitly labeled; it does not demonstrate live AI quality.
-
-### 5. What do the AI evaluations actually measure?
+### 4. What do the AI evaluations actually measure?
 
 > I cannot control the underlying model's training, but I control its instructions, tools, schemas, context and validation. My evaluations check whether that combined system uses recorded facts, respects constraints and creates reviewable proposals without changing training records.
 
@@ -79,7 +70,7 @@ Regexes and structural checks are deliberately limited. Mentioning “60” does
 
 The runner does not test automatic memory extraction, persisted conversation recovery, HTTP auth, or account sign-in. Those have separate deterministic tests. Its grader/integration tests use fabricated or scripted model responses: passing those establishes that the harness works, not that a real model passed. No live AI score should be claimed before a real run and human review.
 
-### 6. How do you measure performance honestly?
+### 5. How do you measure performance honestly?
 
 > I benchmark the real browser database rather than an in-memory imitation. I separate fixture setup from timing, warm up once, collect 20 samples, and record p50 and p95 at increasing history sizes.
 
@@ -134,7 +125,7 @@ Run this only after the ordinary database suite, not concurrently. It applies mi
 
 ## Five-minute interview demonstration
 
-1. Open demo, show the seeded history, start a workout, record a set and reload. Explain the local database.
+1. Use a prepared account with synthetic training data. Show a plan, start a workout, record a set and reload. Explain the local database. Verify the deployed flow beforehand; there is no separate sample-data demo mode.
 2. Show CI and explain which checks use mocks and which use PostgreSQL.
 3. Walk through `frontend/e2e-real/sync.spec.ts`: two browser contexts, an offline edit, a cloud edit, and explicit conflict resolution.
 4. Show a benchmark JSON report and explain p95, fixture sizes and why full scans grow.
