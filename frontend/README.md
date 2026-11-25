@@ -4,7 +4,7 @@ Run `npm run dev` in this directory. Validate changes with `npm test`, `npm run 
 
 ## App viewport
 
-The app shell uses `src/appViewport.ts` to follow the browser's visible viewport in a tab and CSS `100dvh` in standalone mode (including iOS's `navigator.standalone`). Installed mode switches to the visual viewport while an editing control has an on-screen keyboard open. Safe-area padding remains inside the layout, so the bottom navigation background covers the home-indicator area without covering its buttons.
+The app shell uses `src/appViewport.ts` to follow the browser's visible viewport in a tab. Standalone mode (including iOS's `navigator.standalone`) anchors the shell to all four window edges, avoiding shortened viewport-height units. Installed mode switches to the visual viewport while an editing control has an on-screen keyboard open. Top safe-area padding belongs to the shared shell so error banners, Coach, and workouts all stay below the status bar. Bottom navigation and its surrounding canvas share a background in installed mode, including the home-indicator area; its buttons remain above the bottom inset.
 
 ## Account-scoped reads
 

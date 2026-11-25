@@ -89,12 +89,23 @@ for (const installed of [false, true]) {
       Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
     }, { installed });
     await openApp(page);
+    await page.addStyleTag({ content: ':root { --safe-area-top: 59px; --safe-area-bottom: 34px; }' });
     const nav = page.getByRole('navigation', { name: 'Main navigation' });
     const expectedBottom = page.viewportSize()!.height - (installed ? 0 : 60);
     await expect.poll(async () => {
       const box = (await nav.boundingBox())!;
       return Math.round(box.y + box.height);
     }).toBe(expectedBottom);
+    expect((await page.locator('.app-header').boundingBox())!.y).toBe(59);
+    const lastLink = (await nav.getByRole('link', { name: 'History', exact: true }).boundingBox())!;
+    expect(lastLink.y + lastLink.height).toBeLessThanOrEqual(expectedBottom - 34);
+    if (installed) {
+      // Standalone must fill the fixed containing block even when iOS's
+      // viewport-height measurement is shorter than the app window.
+      await page.evaluate(() => document.documentElement.style.setProperty('--app-height', `${innerHeight - 60}px`));
+      expect(await page.locator('.app-shell').evaluate(el => Math.round(el.getBoundingClientRect().bottom))).toBe(expectedBottom);
+      expect(await page.locator('html').evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(25, 29, 23)');
+    }
     const main = (await page.locator('#main-content').boundingBox())!;
     expect(main.y + main.height).toBeLessThanOrEqual((await nav.boundingBox())!.y + 1);
 
@@ -117,6 +128,35 @@ for (const installed of [false, true]) {
     }).toBe(expectedBottom);
   });
 }
+
+test('iPhone safe area keeps error banners below the status bar on every screen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'standalone', { configurable: true, value: true });
+  });
+  await openApp(page);
+  await page.addStyleTag({ content: ':root { --safe-area-top: 59px; --safe-area-bottom: 34px; }' });
+  await makePlan(page);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByLabel('Import backup', { exact: true }).setInputFiles({
+    name: 'invalid.json', mimeType: 'application/json', buffer: Buffer.from('{"version":99}'),
+  });
+  const alert = page.locator('.app-shell > .toast.error');
+  const expectSafeError = async () => {
+    await expect(alert).toBeVisible();
+    const box = (await alert.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(59);
+    expect(box.y + box.height).toBeLessThanOrEqual(844 - 34);
+    expect((await page.locator('#main-content').boundingBox())!.y).toBeGreaterThanOrEqual(box.y + box.height);
+  };
+  await expectSafeError();
+  await openCoach(page);
+  await expectSafeError();
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('button', { name: 'Start workout', exact: true }).click();
+  await expect(page.locator('.active-workout-shell')).toBeVisible();
+  await expectSafeError();
+});
 
 async function openMainPage(page: Page, name: 'Plan' | 'History') {
   if (new URL(page.url()).pathname === '/coach' || new URL(page.url()).pathname.startsWith('/workout/')) await page.getByRole('link', { name: 'Today', exact: true }).click();

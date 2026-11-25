@@ -1,5 +1,5 @@
-// iOS standalone can report a visual viewport shorter than the app window even
-// with the keyboard closed. Let CSS size that window, including its safe areas.
+// Installed iOS apps can under-report both visualViewport.height and 100dvh.
+// Anchor the shell to all four window edges unless a keyboard is visible.
 export function trackAppViewport() {
   const viewport = window.visualViewport;
   const standalone = window.matchMedia('(display-mode: standalone)');
@@ -10,8 +10,9 @@ export function trackAppViewport() {
     // A small difference can be system UI; a keyboard takes a substantial part
     // of the window. Keep external-keyboard focus from shortening the app.
     const keyboardOpen = editing && viewport && window.innerHeight - viewport.height > 150;
-    document.documentElement.style.setProperty('--app-height', installed && !keyboardOpen
-      ? '100dvh' : `${viewport?.height ?? window.innerHeight}px`);
+    document.documentElement.dataset.viewportMode = installed && !keyboardOpen ? 'standalone' : 'visual';
+    document.documentElement.style.setProperty('--app-height',
+      `${installed && !keyboardOpen ? window.innerHeight : viewport?.height ?? window.innerHeight}px`);
     // Keyboards can pan the visible area independently of resizing it. Keep
     // Coach aligned with that area rather than the top of the layout viewport.
     document.documentElement.style.setProperty('--app-offset-top',
@@ -37,5 +38,6 @@ export function trackAppViewport() {
     document.removeEventListener('focusout', resize);
     document.documentElement.style.removeProperty('--app-height');
     document.documentElement.style.removeProperty('--app-offset-top');
+    delete document.documentElement.dataset.viewportMode;
   };
 }
