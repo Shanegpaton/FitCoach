@@ -10,6 +10,7 @@ import { getSyncAccessToken, useAuth } from './auth';
 import { startSyncCoordinator, type SyncStatus } from './sync';
 import { Modal, Notification } from './ui';
 import { errorMessage } from './errors';
+import { trackAppViewport } from './appViewport';
 import { Today } from './pages/Today';
 import { Plans } from './pages/Plans';
 import { WorkoutPage } from './pages/Workout';
@@ -64,14 +65,7 @@ export function App() {
     if (!toast || toast.error) return;
     const timeout = setTimeout(() => setToast(null), 4000); return () => clearTimeout(timeout);
   }, [toast]);
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    const resize = () => {
-      if (!viewport || viewport.scale === 1) document.documentElement.style.setProperty('--app-height', `${viewport?.height ?? window.innerHeight}px`);
-    };
-    resize(); viewport?.addEventListener('resize', resize); window.addEventListener('resize', resize);
-    return () => { viewport?.removeEventListener('resize', resize); window.removeEventListener('resize', resize); document.documentElement.style.removeProperty('--app-height'); };
-  }, []);
+  useEffect(trackAppViewport, []);
   const database = db;
   const data = useDatabaseQuery(database, async database => {
     if (!auth.userId || readyForUser !== auth.userId || database.ownerId !== auth.userId) return undefined;

@@ -82,6 +82,8 @@ Live Coach uses an explicit account model preference set in **Coach → model se
 
 The phone UI puts Start/Resume ahead of the calendar on Today and three recent sessions ahead of trends in History. **View all sessions** opens a searchable journal in pages of 20. Navigation, Resume, notifications, and workout actions reserve their own space outside the scrolling content, including when the visible viewport shrinks for a phone keyboard. On narrow phones, profile day choices wrap and the week strip can scroll horizontally to retain touch-sized targets.
 
+Installed PWAs fill the app window down to the home-indicator safe area. In a browser tab, the layout follows the visible viewport so navigation stays above browser controls. Both modes resize for the on-screen keyboard.
+
 History reads stay local and account-scoped. The journal fetches completed sessions in indexed pages of 20; charts read only the selected date range, and all-time totals and benchmarks are calculated independently. Search still matches recorded workout names, exercise names, and dates, with a short debounce. Sample Coach initially loads the newest 100 local messages and offers **Load older sample messages** without deleting older records. See [frontend query architecture](frontend/README.md) for the read boundaries.
 
 Workouts record their start when you select **Start workout** and finish when you save the completed workout. The workout log shows both timestamps in local time and total elapsed time, including rests and time away from the app. Active workouts show a live elapsed timer that recovers after reload; History and Today’s recent sessions show completed durations.

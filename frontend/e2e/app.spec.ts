@@ -78,6 +78,46 @@ async function openApp(page: Page) {
   await expect(page.getByRole('dialog')).toHaveCount(0);
 }
 
+for (const installed of [false, true]) {
+  test(`bottom navigation fills the ${installed ? 'installed app window' : 'browser visible viewport'}`, async ({ page }) => {
+    await page.addInitScript(({ installed }) => {
+      Object.defineProperty(navigator, 'standalone', { configurable: true, value: installed });
+      // Reproduce iOS reporting a visual viewport smaller than its app window.
+      const viewport = new EventTarget();
+      Object.assign(viewport, { inset: 60, scale: 1 });
+      Object.defineProperty(viewport, 'height', { get: () => innerHeight - (viewport as EventTarget & { inset: number }).inset });
+      Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    }, { installed });
+    await openApp(page);
+    const nav = page.getByRole('navigation', { name: 'Main navigation' });
+    const expectedBottom = page.viewportSize()!.height - (installed ? 0 : 60);
+    await expect.poll(async () => {
+      const box = (await nav.boundingBox())!;
+      return Math.round(box.y + box.height);
+    }).toBe(expectedBottom);
+    const main = (await page.locator('#main-content').boundingBox())!;
+    expect(main.y + main.height).toBeLessThanOrEqual((await nav.boundingBox())!.y + 1);
+
+    await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Training background (optional)', exact: true }).focus();
+    await page.evaluate(() => {
+      Object.assign(window.visualViewport!, { inset: 300 });
+      window.visualViewport!.dispatchEvent(new Event('resize'));
+    });
+    await expect.poll(() => page.locator('.app-shell').evaluate(el => Math.round(el.getBoundingClientRect().height)))
+      .toBe(page.viewportSize()!.height - 300);
+    await page.evaluate(() => {
+      (document.activeElement as HTMLElement).blur();
+      Object.assign(window.visualViewport!, { inset: 60 });
+      window.visualViewport!.dispatchEvent(new Event('resize'));
+    });
+    await expect.poll(async () => {
+      const box = (await nav.boundingBox())!;
+      return Math.round(box.y + box.height);
+    }).toBe(expectedBottom);
+  });
+}
+
 async function openMainPage(page: Page, name: 'Plan' | 'History') {
   if (new URL(page.url()).pathname === '/coach' || new URL(page.url()).pathname.startsWith('/workout/')) await page.getByRole('link', { name: 'Today', exact: true }).click();
   await page.getByRole('link', { name, exact: true }).click();

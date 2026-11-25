@@ -2,6 +2,10 @@
 
 Run `npm run dev` in this directory. Validate changes with `npm test`, `npm run build`, and `npm run test:e2e` for user workflows. Production builds require an HTTPS API origin; see the [root README](../README.md) for environment setup. Playwright supplies its own test-only HTTPS service origins and requires Google Chrome and Playwright WebKit.
 
+## App viewport
+
+The app shell uses `src/appViewport.ts` to follow the browser's visible viewport in a tab and CSS `100dvh` in standalone mode (including iOS's `navigator.standalone`). Installed mode switches to the visual viewport while an editing control has an on-screen keyboard open. Safe-area padding remains inside the layout, so the bottom navigation background covers the home-indicator area without covering its buttons.
+
 ## Account-scoped reads
 
 IndexedDB remains the immediate local store. Shared app context contains the active `TrainingDB` instance, profile, exercise catalog, plans, schedule overrides, and shared actions. It does not load session or message history. Account-owned views unmount together on account changes.
