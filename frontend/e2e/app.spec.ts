@@ -128,6 +128,57 @@ async function openCoach(page: Page) {
   if (new URL(page.url()).pathname !== '/coach') await page.getByRole('link', { name: 'Coach', exact: true }).click();
 }
 
+for (const installed of [false, true]) {
+  test(`Coach keeps the draft above a resized and panned keyboard in ${installed ? 'installed' : 'browser'} mode`, async ({ page }) => {
+    await page.addInitScript(installed => {
+      Object.defineProperty(navigator, 'standalone', { configurable: true, value: installed });
+    }, installed);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openApp(page);
+    await openCoach(page);
+    const input = page.getByRole('textbox', { name: 'Message Coach', exact: true });
+    await input.fill('My next workout');
+
+    // Browser automation does not open an OS keyboard. Model its independent
+    // visual viewport resize and pan events without resizing the layout viewport.
+    const viewport = async (height: number, offsetTop: number, event: 'resize' | 'scroll') => {
+      await page.evaluate(({ height, offsetTop, event }) => {
+        Object.defineProperties(window.visualViewport!, {
+          height: { configurable: true, value: height },
+          offsetTop: { configurable: true, value: offsetTop },
+        });
+        window.visualViewport!.dispatchEvent(new Event(event));
+      }, { height, offsetTop, event });
+    };
+    const expectVisibleDraft = async (height: number, offsetTop: number) => {
+      await expect.poll(async () => {
+        const box = await input.boundingBox();
+        return !!box && box.y >= offsetTop && box.y + box.height <= offsetTop + height
+          && offsetTop + height - box.y - box.height < 50;
+      }).toBe(true);
+      await expect(input).toHaveValue('My next workout');
+    };
+
+    await viewport(370, 0, 'resize');
+    await expectVisibleDraft(370, 0);
+    await viewport(370, 170, 'scroll');
+    await expectVisibleDraft(370, 170);
+    await input.press('End');
+    await input.press('Shift+Enter');
+    await input.pressSequentially('Keep this line visible');
+    await expect(input).toHaveValue('My next workout\nKeep this line visible');
+    await expect(input).toBeFocused();
+
+    await input.blur();
+    await viewport(844, 0, 'resize');
+    await expect.poll(async () => {
+      const box = await input.boundingBox();
+      return !!box && box.y > 650 && box.y + box.height <= 844;
+    }).toBe(true);
+    await expect(input).toHaveValue('My next workout\nKeep this line visible');
+  });
+}
+
 async function waitForCoachSync(page: Page) {
   // Onboarding can finish while bootstrap is running. A foreground event asks
   // the coordinator to upload that local change once the current pass finishes.

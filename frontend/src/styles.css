@@ -659,6 +659,10 @@ legend { font-size: 13px; color: #c2c8b9; font-weight: 600; margin-bottom: 12px;
 }
 
 /* A single toolbar replaces global chrome while chatting. */
+html:has(.coach-shell) { scroll-padding-block: 0; }
+.coach-shell { top: var(--app-offset-top, 0px); }
+.coach-shell #main-content { overflow: hidden; scroll-padding-block: 0; }
+.coach-shell .chat-composer textarea { scroll-margin-block: 0; }
 .coach-shell .coach-page { padding: calc(4px + env(safe-area-inset-top)) 16px calc(8px + env(safe-area-inset-bottom)); }
 .coach-shell .coach-header { min-height: 52px; gap: 4px; border-bottom: 1px solid var(--border); }
 .coach-toolbar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; letter-spacing: normal; }
